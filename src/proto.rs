@@ -7,9 +7,9 @@ pub const PROTO_UPDATEGAME: u64 = 1003;
 
 #[derive(Deserialize)]
 pub struct CGStartMatch {
-    pub id: String,   // 玩家ID
-    pub name: String, // 玩家昵称
-    pub level: u32,   // 玩家等级
+    pub id: String,     // 玩家ID
+    pub name: String,   // 玩家昵称
+    pub elo_score: u32, // elo 分值
 }
 
 #[derive(Serialize)]

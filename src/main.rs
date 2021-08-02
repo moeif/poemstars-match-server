@@ -201,7 +201,7 @@ fn main() {
 
     // 保存所有的游戏
     // let mut games = HashMap::new();
-    let mut matching_map: HashMap<u32, VecDeque<MatchingReq>> = HashMap::new();
+    let mut matching_vec: Vec<MatchingReq> = Vec::new();
     // 当前在游戏中的玩家，开始匹配的时间
     let mut gaming_player_map: HashMap<String, i64> = HashMap::new();
     // 保存当前正在进行中的游戏
@@ -222,30 +222,21 @@ fn main() {
                                         let start_match_timestamp = get_timestamp();
                                         let player_id = match_info.id.clone();
                                         let socket_endpoint_id = endpoint_id.clone();
-                                        let level = match_info.level;
                                         let matching_req = MatchingReq {
                                             endpoint_id: socket_endpoint_id,
                                             cg_match_info: match_info,
                                             start_match_timestamp,
                                         };
 
-                                        if !matching_map.contains_key(&level) {
-                                            matching_map.insert(level, VecDeque::new());
-                                        }
-
-                                        if let Some(queue) = matching_map.get_mut(&level) {
-                                            queue.push_back(matching_req);
-                                            gaming_player_map
-                                                .insert(player_id, start_match_timestamp);
-                                            // 回复消息，匹配中 CGStartMatch
-                                            if let Some(proto_json_str) =
-                                                proto::GCStartMatch::gc_to_json(0)
-                                            {
-                                                handler.signals().send(Signal::Send(
-                                                    endpoint_id,
-                                                    proto_json_str,
-                                                ));
-                                            }
+                                        gaming_player_map.insert(player_id, start_match_timestamp);
+                                        matching_vec.push(matching_req);
+                                        // 回复消息，匹配中 CGStartMatch
+                                        if let Some(proto_json_str) =
+                                            proto::GCStartMatch::gc_to_json(0)
+                                        {
+                                            handler
+                                                .signals()
+                                                .send(Signal::Send(endpoint_id, proto_json_str));
                                         }
                                     } else {
                                         // 玩家当前已经在匹配或游戏中，暂时不让进了，直接回复匹配失败
