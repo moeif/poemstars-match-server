@@ -1,7 +1,9 @@
 use crate::common::Signal;
 use crate::gamematch;
+use crate::gamematch::MatchRequest;
 use crate::poemtable::PoemTable;
 use crate::proto;
+use crate::robot::{Robot, RobotController};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -9,30 +11,21 @@ const MATCH_POEM_NUM: u32 = 10;
 const MATCH_TIME: u8 = 5;
 const OPT_TIMEOUT: i64 = 10;
 
-#[derive(Serialize)]
 struct Player {
-    pub id: String,
-    pub endpoint_id: Option<String>,
-    pub name: String,
-    pub last_opt_timestamp: i64, // 最后一次的操作时间
-    pub last_opt_index: i32,     // 最后一次操作的索引
-    pub opt_bitmap: u32,         // 操作位数据, 0 正确，1 错误
-    pub is_dirty: bool,
+    endpoint_id: Option<String>,
+    player_id: String,
+    player_name: String,
+    player_level: u32,
+    player_elo_score: u32,
+    player_correct_rate: f64,
+    last_opt_timestamp: i64, // 最后一次的操作时间
+    last_opt_index: i32,     // 最后一次操作的索引
+    opt_bitmap: u32,         // 操作位数据, 0 正确，1 错误
+    is_dirty: bool,
+    robot: Option<Robot>,
 }
 
 impl Player {
-    fn new(endpoint_id: Option<String>, id: String, name: String, last_opt_timestamp: i64) -> Self {
-        Self {
-            id,
-            endpoint_id,
-            name,
-            last_opt_timestamp,
-            last_opt_index: -1,
-            opt_bitmap: 0,
-            is_dirty: false,
-        }
-    }
-
     fn is_all_opt_end(&self) -> bool {
         self.last_opt_index + 1 == MATCH_POEM_NUM as i32
     }
@@ -63,20 +56,22 @@ impl Player {
     }
 }
 
-#[derive(Serialize)]
 struct Game {
-    pub id: String,           // 游戏ID
-    pub start_timestamp: i64, // 游戏开始时间戳
-    pub player1: Player,
-    pub player2: Player,
-    pub is_gaming: bool, // 游戏进行中
-    pub is_dirty: bool,
+    id: String,           // 游戏ID
+    start_timestamp: i64, // 游戏开始时间戳
+    player1: Player,
+    player2: Player,
+    is_gaming: bool, // 游戏进行中
+    is_dirty: bool,
 }
 
 impl Game {
     fn new(player1: Player, player2: Player, start_timestamp: i64) -> Self {
         Self {
-            id: format!("{}_{}_{}", player1.id, player2.id, start_timestamp),
+            id: format!(
+                "{}_{}_{}",
+                player1.player_id, player2.player_id, start_timestamp
+            ),
             start_timestamp,
             player1,
             player2,
@@ -92,9 +87,9 @@ impl Game {
     }
 
     fn on_opt(&mut self, opt: proto::CGMatchGameOpt, curr_timestamp: i64) {
-        if opt.id == self.player1.id {
+        if opt.id == self.player1.player_id {
             self.player1.on_opt(opt, curr_timestamp);
-        } else if opt.id == self.player2.id {
+        } else if opt.id == self.player2.player_id {
             self.player2.on_opt(opt, curr_timestamp);
         }
     }
@@ -116,15 +111,16 @@ impl Game {
         self.player2.update_opt_timeout_status(curr_timestamp);
     }
 
-    fn gc_to_json(&self) -> Option<String> {
-        if let Ok(json_str) = serde_json::to_string(self) {
-            if let Ok(proto_data_json_str) =
-                serde_json::to_string(&proto::ProtoData::new(proto::PROTO_UPDATEGAME, json_str))
-            {
-                return Some(proto_data_json_str);
-            }
-        }
-        return None;
+    fn gc_update_to_json(&self) -> Option<String> {
+        // if let Ok(json_str) = serde_json::to_string(self) {
+        //     if let Ok(proto_data_json_str) =
+        //         serde_json::to_string(&proto::ProtoData::new(proto::PROTO_UPDATEGAME, json_str))
+        //     {
+        //         return Some(proto_data_json_str);
+        //     }
+        // }
+        // return None;
+        // TODO:
     }
 }
 
@@ -133,6 +129,7 @@ pub struct MatchGameController {
     last_update_timestamp: i64,
     ended_game: Vec<String>,
     poem_table: PoemTable,
+    robot_ctrl: RobotController,
 }
 
 impl MatchGameController {
@@ -142,6 +139,7 @@ impl MatchGameController {
             last_update_timestamp: -1,
             ended_game: Vec::new(),
             poem_table: PoemTable::new(),
+            robot_ctrl: RobotController::new(),
         }
     }
 
@@ -189,58 +187,36 @@ impl MatchGameController {
         return some_signal_vec;
     }
 
-    pub fn create_new_game(
+    pub fn start_new_game(
         &mut self,
-        match_result: gamematch::MatchResult,
+        player1: Player,
+        player2: Player,
         curr_timestamp: i64,
     ) -> Option<Signal> {
-        let main_player_level = match_result.match_req1.cg_match_info.level;
+        let player_level = player1.player_level;
         if let Some(poem_json_str) = self
             .poem_table
-            .get_random_game_data(main_player_level, MATCH_POEM_NUM)
+            .get_random_game_data(player_level, MATCH_POEM_NUM)
         {
-            let player1_id = match_result.match_req1.cg_match_info.id.clone();
-            let player1_name = match_result.match_req1.cg_match_info.name.clone();
-            let (player2_id, player2_name) = match match_result.get_match_req2_id_name() {
-                Some((id, name)) => (id, name),
-                None => match &match_result.robot {
-                    Some(ref robot) => (robot.id.clone(), robot.name.clone()),
-                    None => (String::from("Unknow"), String::from("Unknow")),
-                },
-            };
+            let player1_id = player1.player_id.clone();
+            let player1_name = player1.player_name.clone();
+            let player2_id = player2.player_id.clone();
+            let player2_name = player2.player_name.clone();
 
             let gc_start_game = proto::GCStartGame {
-                player1_id: player1_id.clone(),
-                player1_name: player1_name.clone(),
-                player2_id: player2_id.clone(),
-                player2_name: player2_name.clone(),
+                player1_id: player1_id,
+                player1_name: player1_name,
+                player2_id: player2_id,
+                player2_name: player2_name,
                 poem_data_str: poem_json_str,
             };
 
             // 创建消息同步 Signal
             if let Ok(gc_start_game_json_str) = serde_json::to_string(&gc_start_game) {
-                let player1_endpoint_id = match_result.get_match_req1_endpoint_id();
-                let player2_endpoint_id: Option<String> = match_result.get_match_req2_endpoint_id();
-
                 let signal = Signal::Sync(
-                    player1_endpoint_id.clone(),
-                    player2_endpoint_id.clone(),
+                    player1.endpoint_id.clone(),
+                    player2.endpoint_id.clone(),
                     gc_start_game_json_str,
-                );
-
-                // 创建游戏
-                let player1 = Player::new(
-                    player1_endpoint_id,
-                    player1_id,
-                    player1_name,
-                    curr_timestamp,
-                );
-
-                let player2 = Player::new(
-                    player2_endpoint_id,
-                    player2_id,
-                    player2_name,
-                    curr_timestamp,
                 );
 
                 let game = Game::new(player1, player2, curr_timestamp);
@@ -254,5 +230,42 @@ impl MatchGameController {
         }
 
         return None;
+    }
+
+    pub fn create_robot_player(&self, competitor_player: &Player, curr_timestamp: i64) -> Player {
+        let robot = self.robot_ctrl.get_robot(
+            competitor_player.player_level,
+            competitor_player.player_elo_score,
+            competitor_player.player_correct_rate,
+        );
+        Player {
+            endpoint_id: None,
+            player_id: robot.id.clone(),
+            player_name: robot.name.clone(),
+            player_level: robot.level,
+            player_elo_score: robot.elo_score,
+            player_correct_rate: robot.correct_rate,
+            last_opt_timestamp: curr_timestamp,
+            last_opt_index: -1,
+            opt_bitmap: 0,
+            is_dirty: false,
+            robot: Some(robot),
+        }
+    }
+}
+
+pub fn create_player_from_match(match_reqeust: MatchRequest, curr_timestamp: i64) -> Player {
+    Player {
+        endpoint_id: match_reqeust.endpoint_id,
+        player_id: match_reqeust.player_id,
+        player_name: match_reqeust.player_name,
+        player_level: match_reqeust.player_level,
+        player_elo_score: match_reqeust.player_elo_score,
+        player_correct_rate: match_reqeust.player_correct_rate,
+        last_opt_timestamp: curr_timestamp,
+        last_opt_index: -1,
+        opt_bitmap: 0,
+        is_dirty: false,
+        robot: None,
     }
 }

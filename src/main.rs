@@ -104,16 +104,20 @@ fn main() {
                                 {
                                     if !gaming_player_map.contains_key(&match_info.id) {
                                         let start_match_timestamp = curr_timestamp;
-                                        let player_id = match_info.id.clone();
-                                        let socket_endpoint_id = endpoint_id.clone();
-                                        let matching_req = gamematch::MatchingReq {
-                                            endpoint_id: socket_endpoint_id,
-                                            cg_match_info: match_info,
-                                            start_match_timestamp,
+
+                                        let match_request = gamematch::MatchRequest {
+                                            endpoint_id: Some(endpoint_id.clone()),
+                                            player_id: match_info.id.clone(),
+                                            player_name: match_info.name.clone(),
+                                            player_level: match_info.level,
+                                            player_elo_score: match_info.elo_score,
+                                            player_correct_rate: match_info.correct_rate,
+                                            timestamp: curr_timestamp,
                                         };
 
-                                        gaming_player_map.insert(player_id, start_match_timestamp);
-                                        match_controller.add_match(matching_req);
+                                        gaming_player_map
+                                            .insert(match_info.id, start_match_timestamp);
+                                        match_controller.add_match(match_request);
                                         // 回复消息，匹配中 CGStartMatch
                                         if let Some(proto_json_str) =
                                             proto::GCStartMatch::gc_to_json(0)
@@ -156,13 +160,36 @@ fn main() {
                 handler.signals().send(signal);
             }
         }
-        if let Some(match_result) = match_controller.update_matches(curr_timestamp) {
-            // 将这两个玩家匹配到一起，创建一个游戏, 然后同步游戏开始消息
-            if let Some(start_game_signal) =
-                match_game_controller.create_new_game(match_result, curr_timestamp)
-            {
-                handler.signals().send(start_game_signal);
+
+        if let Some((some_match_request1, some_match_request2)) =
+            match_controller.update_matches(curr_timestamp)
+        {
+            if let Some(match_request1) = some_match_request1 {
+                let game_player1 =
+                    gameplay::create_player_from_match(match_request1, curr_timestamp);
+                let game_player2 = if let Some(match_request2) = some_match_request2 {
+                    gameplay::create_player_from_match(match_request2, curr_timestamp)
+                } else {
+                    match_game_controller.create_robot_player(&game_player1, curr_timestamp)
+                };
+
+                if let Some(start_game_signal) =
+                    match_game_controller.start_new_game(game_player1, game_player2)
+                {
+                    handler.signals().send(start_game_signal);
+                }
+            } else {
+                println!("逻辑错误，匹配返回Some时第一个玩家不可能为None");
             }
         }
+
+        // {
+        //     // 将这两个玩家匹配到一起，创建一个游戏, 然后同步游戏开始消息
+        //     if let Some(start_game_signal) =
+        //         match_game_controller.create_new_game(match_result, curr_timestamp)
+        //     {
+        //         handler.signals().send(start_game_signal);
+        //     }
+        // }
     }
 }
