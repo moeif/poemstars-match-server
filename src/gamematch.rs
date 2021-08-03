@@ -1,8 +1,6 @@
-use crate::common::Signal;
 use crate::petable::PETable;
 use crate::proto;
 use crate::robot::Robot;
-use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 
 const MATCH_POEM_NUM: i32 = 10;
@@ -35,6 +33,28 @@ impl MatchResult {
             use_robot,
             robot,
         }
+    }
+
+    pub fn get_match_req2_id_name(&self) -> Option<(String, String)> {
+        if let Some(ref match_req2) = self.match_req2 {
+            return Some((
+                match_req2.cg_match_info.id.clone(),
+                match_req2.cg_match_info.name.clone(),
+            ));
+        };
+        return None;
+    }
+
+    pub fn get_match_req1_endpoint_id(&self) -> Option<String> {
+        return Some(self.match_req1.endpoint_id.clone());
+    }
+
+    pub fn get_match_req2_endpoint_id(&self) -> Option<String> {
+        if let Some(ref match_req2) = self.match_req2 {
+            return Some(match_req2.endpoint_id.clone());
+        }
+
+        return None;
     }
 }
 
@@ -99,6 +119,7 @@ impl MatchController {
     }
 
     pub fn update_matches(&mut self, curr_timestamp: i64) -> Option<MatchResult> {
+        println!("更新匹配: {}", curr_timestamp);
         self.last_update_timestamp = curr_timestamp;
 
         let len = self.match_vec.len();
@@ -174,7 +195,10 @@ impl MatchController {
                 if matched {
                     if use_robot {
                         let player1_match_req = self.match_vec.remove(imain);
-                        let robot = Robot::new(player1_match_req.cg_match_info.elo_score);
+                        let robot = Robot::new(
+                            player1_match_req.cg_match_info.elo_score,
+                            player1_match_req.cg_match_info.correct_rate,
+                        );
                         let (_ea, _eb, group) = self
                             .pe_table
                             .get_ea_eb(player1_match_req.cg_match_info.elo_score, robot.elo_score);
@@ -208,183 +232,5 @@ impl MatchController {
         }
 
         return None;
-    }
-}
-
-// ----------- game -----------
-#[derive(Serialize)]
-pub struct MatchPlayer {
-    pub id: String,
-    pub endpoint_id: String,
-    pub name: String,
-    pub last_opt_timestamp: i64, // 最后一次的操作时间
-    pub last_opt_index: i32,     // 最后一次操作的索引
-    pub opt_bitmap: u32,         // 操作位数据, 0 正确，1 错误
-    pub is_dirty: bool,
-}
-
-impl MatchPlayer {
-    fn new(endpoint_id: String, id: String, name: String, last_opt_timestamp: i64) -> Self {
-        Self {
-            id,
-            endpoint_id,
-            name,
-            last_opt_timestamp,
-            last_opt_index: -1,
-            opt_bitmap: 0,
-            is_dirty: false,
-        }
-    }
-
-    fn is_all_opt_end(&self) -> bool {
-        self.last_opt_index + 1 == MATCH_POEM_NUM
-    }
-
-    fn on_opt(&mut self, opt: proto::CGMatchGameOpt, curr_timestamp: i64) {
-        if self.last_opt_index + 1 == opt.opt_index as i32 {
-            self.last_opt_index += 1;
-            self.opt_bitmap |= opt.opt_result << self.last_opt_index;
-        }
-        self.is_dirty = true;
-    }
-
-    fn update_opt_timeout_status(&mut self, curr_timestamp: i64) {
-        self.last_opt_index += 1;
-        self.opt_bitmap |= 1 << self.last_opt_index;
-        self.is_dirty = true;
-    }
-
-    fn is_dirty(&mut self) -> bool {
-        let tmp_is_dirty = self.is_dirty;
-        self.is_dirty = false;
-        return tmp_is_dirty;
-    }
-}
-
-#[derive(Serialize)]
-pub struct MatchGame {
-    pub id: String,           // 游戏ID
-    pub start_timestamp: i64, // 游戏开始时间戳
-    pub player1: MatchPlayer,
-    pub player2: MatchPlayer,
-    pub is_gaming: bool, // 游戏进行中
-    pub is_dirty: bool,
-}
-
-impl MatchGame {
-    fn new(player1: MatchPlayer, player2: MatchPlayer, start_timestamp: i64) -> Self {
-        Self {
-            id: format!("{}_{}_{}", player1.id, player2.id, start_timestamp),
-            start_timestamp,
-            player1,
-            player2,
-            is_gaming: true,
-            is_dirty: false,
-        }
-    }
-
-    fn is_dirty(&mut self) -> bool {
-        let is_dirty = self.is_dirty || self.player1.is_dirty() || self.player2.is_dirty();
-        self.is_dirty = false;
-        return is_dirty;
-    }
-
-    fn on_opt(&mut self, opt: proto::CGMatchGameOpt, curr_timestamp: i64) {
-        if opt.id == self.player1.id {
-            self.player1.on_opt(opt, curr_timestamp);
-        } else if opt.id == self.player2.id {
-            self.player2.on_opt(opt, curr_timestamp);
-        }
-    }
-
-    // 更新游戏是否结束
-    fn update_end_status(&mut self) {
-        if self.player1.is_all_opt_end() && self.player2.is_all_opt_end() {
-            self.is_gaming = false;
-            self.is_dirty = true;
-        }
-    }
-
-    fn is_game_end(&self) -> bool {
-        !self.is_gaming
-    }
-
-    fn update_opt_timeout_status(&mut self, curr_timestamp: i64) {
-        self.player1.update_opt_timeout_status(curr_timestamp);
-        self.player2.update_opt_timeout_status(curr_timestamp);
-    }
-
-    fn gc_to_json(&self) -> Option<String> {
-        if let Ok(json_str) = serde_json::to_string(self) {
-            if let Ok(proto_data_json_str) =
-                serde_json::to_string(&proto::ProtoData::new(proto::PROTO_UPDATEGAME, json_str))
-            {
-                return Some(proto_data_json_str);
-            }
-        }
-        return None;
-    }
-}
-
-pub struct MatchGameController {
-    game_map: HashMap<String, MatchGame>,
-    last_update_timestamp: i64,
-    ended_game: Vec<String>,
-}
-
-impl MatchGameController {
-    pub fn new() -> Self {
-        Self {
-            game_map: HashMap::new(),
-            last_update_timestamp: -1,
-            ended_game: Vec::new(),
-        }
-    }
-
-    pub fn on_opt(&mut self, opt_info: proto::CGMatchGameOpt, curr_timestamp: i64) {
-        if let Some(game) = self.game_map.get_mut(&opt_info.game_id) {
-            game.on_opt(opt_info, curr_timestamp);
-        }
-    }
-
-    pub fn update_games(&mut self, curr_timestamp: i64) -> Option<Vec<Signal>> {
-        self.ended_game.clear();
-        let mut some_signal_vec: Option<Vec<Signal>> = None;
-        for (_, game) in self.game_map.iter_mut() {
-            game.update_opt_timeout_status(curr_timestamp);
-            game.update_end_status();
-
-            if game.is_dirty() {
-                if let Some(proto_json_str) = game.gc_to_json() {
-                    let signal = Signal::Sync(
-                        game.player1.endpoint_id.clone(),
-                        game.player2.endpoint_id.clone(),
-                        proto_json_str,
-                    );
-
-                    if let Some(ref mut signal_vec) = some_signal_vec {
-                        signal_vec.push(signal);
-                    } else {
-                        let mut vec: Vec<Signal> = Vec::new();
-                        vec.push(signal);
-                        some_signal_vec = Some(vec);
-                    }
-                }
-            }
-
-            if game.is_game_end() {
-                self.ended_game.push(game.id.clone());
-            }
-        }
-
-        for game_id in self.ended_game.iter() {
-            self.game_map.remove(game_id);
-        }
-
-        return some_signal_vec;
-    }
-
-    pub fn create_new_game(&self, match_result: MatchResult) -> Option<Signal> {
-        None
     }
 }

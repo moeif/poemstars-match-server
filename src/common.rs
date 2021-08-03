@@ -1,5 +1,5 @@
 #[derive(Clone)]
 pub enum Signal {
     Send(String, String),
-    Sync(String, String, String),
+    Sync(Option<String>, Option<String>, String),
 }

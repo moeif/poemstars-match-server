@@ -7,10 +7,11 @@ pub const PROTO_UPDATEGAME: u64 = 1003;
 
 #[derive(Deserialize)]
 pub struct CGStartMatch {
-    pub id: String,     // 玩家ID
-    pub name: String,   // 玩家昵称
-    pub level: u32,     // 胜利次数
-    pub elo_score: u32, // elo 分值
+    pub id: String,        // 玩家ID
+    pub name: String,      // 玩家昵称
+    pub level: u32,        // 胜利次数
+    pub elo_score: u32,    // elo 分值
+    pub correct_rate: f64, // 正确率
 }
 
 #[derive(Serialize)]
@@ -39,7 +40,7 @@ pub struct GCStartGame {
     pub player1_name: String,
     pub player2_id: String,
     pub player2_name: String,
-    pub poem_data: Vec<u32>,
+    pub poem_data_str: String,
 }
 
 #[derive(Deserialize)]

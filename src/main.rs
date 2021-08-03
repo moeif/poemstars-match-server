@@ -5,21 +5,20 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
 mod common;
-mod models;
+mod gamematch;
+mod gameplay;
 mod petable;
+mod poemtable;
 mod proto;
-mod utils;
-use petable::PETable;
 mod robot;
+mod utils;
 
 fn main() {
-    let pe_table = PETable::new();
-
     let (tx, rx) = mpsc::channel();
 
     let (handler, listener) = node::split();
     let server_handler = handler.clone();
-    let server_task = thread::spawn(move || {
+    thread::spawn(move || {
         if let Ok((_, _)) = server_handler
             .network()
             .listen(Transport::Ws, "0.0.0.0:3044")
@@ -65,16 +64,20 @@ fn main() {
                     }
                     common::Signal::Sync(endpoint_id1, endpoint_id2, json_str) => {
                         println!(
-                            "Sync to client: {} - {} - {}",
+                            "Sync to client: {:?} - {:?} - {}",
                             endpoint_id1, endpoint_id2, json_str
                         );
                         let data = json_str.as_bytes();
-                        if let Some(client_endpoint) = clients.get(&endpoint_id1) {
-                            server_handler.network().send(*client_endpoint, data);
+                        if let Some(endpoint_id1) = endpoint_id1 {
+                            if let Some(client_endpoint) = clients.get(&endpoint_id1) {
+                                server_handler.network().send(*client_endpoint, data);
+                            }
                         }
 
-                        if let Some(client_endpoint) = clients.get(&endpoint_id2) {
-                            server_handler.network().send(*client_endpoint, data);
+                        if let Some(endpoint_id2) = endpoint_id2 {
+                            if let Some(client_endpoint) = clients.get(&endpoint_id2) {
+                                server_handler.network().send(*client_endpoint, data);
+                            }
                         }
                     }
                 },
@@ -84,8 +87,8 @@ fn main() {
 
     // 当前在游戏中的玩家，开始匹配的时间
     let mut gaming_player_map: HashMap<String, i64> = HashMap::new();
-    let mut match_controller = models::MatchController::new();
-    let mut match_game_controller = models::MatchGameController::new();
+    let mut match_controller = gamematch::MatchController::new();
+    let mut match_game_controller = gameplay::MatchGameController::new();
 
     // game server logic loop
     loop {
@@ -103,7 +106,7 @@ fn main() {
                                         let start_match_timestamp = curr_timestamp;
                                         let player_id = match_info.id.clone();
                                         let socket_endpoint_id = endpoint_id.clone();
-                                        let matching_req = models::MatchingReq {
+                                        let matching_req = gamematch::MatchingReq {
                                             endpoint_id: socket_endpoint_id,
                                             cg_match_info: match_info,
                                             start_match_timestamp,
@@ -137,11 +140,6 @@ fn main() {
                                 if let Ok(opt_info) =
                                     serde_json::from_str::<proto::CGMatchGameOpt>(proto_json_str)
                                 {
-                                    // if let Some(game) = match_game_map.get_mut(&opt_info.game_id) {
-                                    //     // 设置玩家操作，会设置 dirty 状态，统一同步
-                                    //     game.on_opt(opt_info);
-                                    //     // 操作完后同步给两个玩家
-                                    // }
                                     match_game_controller.on_opt(opt_info, curr_timestamp);
                                 }
                             }
@@ -160,7 +158,9 @@ fn main() {
         }
         if let Some(match_result) = match_controller.update_matches(curr_timestamp) {
             // 将这两个玩家匹配到一起，创建一个游戏, 然后同步游戏开始消息
-            if let Some(start_game_signal) = match_game_controller.create_new_game(match_result) {
+            if let Some(start_game_signal) =
+                match_game_controller.create_new_game(match_result, curr_timestamp)
+            {
                 handler.signals().send(start_game_signal);
             }
         }
