@@ -9,6 +9,7 @@ pub const PROTO_UPDATEGAME: u64 = 1003;
 pub struct CGStartMatch {
     pub id: String,     // 玩家ID
     pub name: String,   // 玩家昵称
+    pub level: u32,     // 胜利次数
     pub elo_score: u32, // elo 分值
 }
 
