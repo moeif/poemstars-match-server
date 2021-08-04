@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
 mod common;
+mod config;
 mod gamematch;
 mod gameplay;
 mod petable;
@@ -12,25 +13,34 @@ mod poemtable;
 mod proto;
 mod robot;
 mod utils;
+extern crate redis;
+use redis::Commands;
 
 fn main() {
-    let (tx, rx) = mpsc::channel();
+    let server_config = config::ServerConfig::new();
+    // println!("{:#?}", server_config);
+
+    let (tx_for_server, rx_for_game_loop) = mpsc::channel();
+    let (tx_for_game_loop, rx_for_redis_handler) = mpsc::channel();
+
     let (handler, listener) = node::split();
-    start_server(handler.clone(), listener, tx);
-    start_game_loop(handler, rx);
+    start_redis_handler(&server_config.lang, rx_for_redis_handler);
+    start_server(handler.clone(), listener, tx_for_server, server_config.port);
+    start_game_loop(handler, tx_for_game_loop, rx_for_game_loop, &server_config);
 }
 
 fn start_server(
     server_handler: message_io::node::NodeHandler<common::Signal>,
     listener: message_io::node::NodeListener<common::Signal>,
     tx: std::sync::mpsc::Sender<(std::string::String, std::string::String)>,
+    port: u32,
 ) {
     thread::spawn(move || {
         // 等2秒后再启动监听
         thread::sleep(std::time::Duration::from_secs(2));
         if let Ok((_, _)) = server_handler
             .network()
-            .listen(Transport::Ws, "0.0.0.0:3044")
+            .listen(Transport::Ws, &format!("0.0.0.0:{}", port))
         {
             println!("WebSocket Server Started!");
             let mut clients = HashMap::new();
@@ -97,18 +107,24 @@ fn start_server(
 
 fn start_game_loop(
     handler: message_io::node::NodeHandler<common::Signal>,
-    rx: std::sync::mpsc::Receiver<(std::string::String, std::string::String)>,
+    tx_to_redis_handler: std::sync::mpsc::Sender<(std::string::String, u32)>,
+    rx_from_server: std::sync::mpsc::Receiver<(std::string::String, std::string::String)>,
+    config: &config::ServerConfig,
 ) {
     println!("Game Loop Started!");
     // 当前在游戏中的玩家，开始匹配的时间
     let mut gaming_player_map: HashMap<String, i64> = HashMap::new();
     let mut match_controller = gamematch::MatchController::new();
-    let mut match_game_controller = gameplay::MatchGameController::new();
+    let mut match_game_controller = gameplay::MatchGameController::new(
+        tx_to_redis_handler,
+        config.poem_mill_time,
+        config.poem_score,
+    );
 
     // game server logic loop
     loop {
         let curr_timestamp = utils::get_timestamp_millis();
-        if let Ok((endpoint_id, json_str)) = rx.try_recv() {
+        if let Ok((endpoint_id, json_str)) = rx_from_server.try_recv() {
             if let Ok(json_values) = serde_json::from_str::<Value>(&json_str) {
                 if let Some(proto_id) = json_values["proto_id"].as_u64() {
                     if let Some(proto_json_str) = json_values["proto_json_str"].as_str() {
@@ -185,7 +201,11 @@ fn start_game_loop(
                 let game_player2 = if let Some(match_request2) = some_match_request2 {
                     gameplay::create_player_from_match(match_request2, curr_timestamp)
                 } else {
-                    match_game_controller.create_robot_player(&game_player1, curr_timestamp)
+                    match_game_controller.create_robot_player(
+                        &game_player1,
+                        curr_timestamp,
+                        config.poem_mill_time,
+                    )
                 };
 
                 if let Some(start_game_signal) =
@@ -198,4 +218,36 @@ fn start_game_loop(
             }
         }
     }
+}
+
+// lang, player_id, player_level
+fn start_redis_handler(lang: &str, rx: std::sync::mpsc::Receiver<(std::string::String, u32)>) {
+    const MATCH_DATA_KEY_NAME: &str = "PoemStarsMatchKill";
+    const MATCH_DATA_EN_KEY_NAME: &str = "PoemStarsEnMatchKill";
+
+    let match_data_key = if lang == "zh" {
+        MATCH_DATA_KEY_NAME
+    } else {
+        MATCH_DATA_EN_KEY_NAME
+    };
+
+    let client = redis::Client::open("redis://127.0.0.1/").unwrap();
+    let mut conn = client.get_connection().unwrap();
+    thread::spawn(move || {
+        println!("Redis Handler Start!");
+        if let Ok((player_id, player_level)) = rx.try_recv() {
+            if let Ok(_result) =
+                conn.zadd::<&str, u32, &str, usize>(match_data_key, &player_id, player_level)
+            {
+                println!("玩家 {}, level: {} 数据添加成功!", player_id, player_level);
+                // 数据添加成功
+            } else {
+                // Log 数据添加失败
+                println!(
+                    "!!!!!!!! 玩家 {}, level: {} 数据添加失败!",
+                    player_id, player_level
+                );
+            }
+        }
+    });
 }
