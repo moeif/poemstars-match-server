@@ -15,15 +15,24 @@ mod utils;
 
 fn main() {
     let (tx, rx) = mpsc::channel();
-
     let (handler, listener) = node::split();
-    let server_handler = handler.clone();
+    start_server(handler.clone(), listener, tx);
+    start_game_loop(handler, rx);
+}
+
+fn start_server(
+    server_handler: message_io::node::NodeHandler<common::Signal>,
+    listener: message_io::node::NodeListener<common::Signal>,
+    tx: std::sync::mpsc::Sender<(std::string::String, std::string::String)>,
+) {
     thread::spawn(move || {
+        // 等2秒后再启动监听
+        thread::sleep(std::time::Duration::from_secs(2));
         if let Ok((_, _)) = server_handler
             .network()
             .listen(Transport::Ws, "0.0.0.0:3044")
         {
-            println!("Server Started!");
+            println!("WebSocket Server Started!");
             let mut clients = HashMap::new();
             listener.for_each(move |event| match event {
                 NodeEvent::Network(net_event) => match net_event {
@@ -84,7 +93,13 @@ fn main() {
             })
         }
     });
+}
 
+fn start_game_loop(
+    handler: message_io::node::NodeHandler<common::Signal>,
+    rx: std::sync::mpsc::Receiver<(std::string::String, std::string::String)>,
+) {
+    println!("Game Loop Started!");
     // 当前在游戏中的玩家，开始匹配的时间
     let mut gaming_player_map: HashMap<String, i64> = HashMap::new();
     let mut match_controller = gamematch::MatchController::new();
@@ -182,14 +197,5 @@ fn main() {
                 println!("逻辑错误，匹配返回Some时第一个玩家不可能为None");
             }
         }
-
-        // {
-        //     // 将这两个玩家匹配到一起，创建一个游戏, 然后同步游戏开始消息
-        //     if let Some(start_game_signal) =
-        //         match_game_controller.create_new_game(match_result, curr_timestamp)
-        //     {
-        //         handler.signals().send(start_game_signal);
-        //     }
-        // }
     }
 }
