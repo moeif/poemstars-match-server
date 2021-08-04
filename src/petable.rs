@@ -51,6 +51,10 @@ impl PETable {
             group = 9;
         }
 
-        (ea, eb, group)
+        if elo1_score > elo2_score {
+            (ea, eb, group)
+        } else {
+            (eb, ea, group)
+        }
     }
 }

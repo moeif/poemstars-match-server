@@ -1,5 +1,4 @@
 use crate::petable::PETable;
-use std::collections::{HashMap, VecDeque};
 
 pub struct MatchRequest {
     pub endpoint_id: Option<String>,
@@ -11,40 +10,7 @@ pub struct MatchRequest {
     pub timestamp: i64,
 }
 
-pub struct MatchQueue {
-    queue: VecDeque<MatchRequest>,
-}
-
-impl MatchQueue {
-    pub fn new() -> Self {
-        Self {
-            queue: VecDeque::new(),
-        }
-    }
-
-    pub fn front_match_timestamp(&self) -> i64 {
-        if let Some(item) = self.queue.front() {
-            return item.timestamp;
-        }
-        return -1;
-    }
-
-    pub fn add_match(&mut self, match_request: MatchRequest) {
-        self.queue.push_back(match_request);
-    }
-
-    pub fn get_front(&mut self) -> Option<MatchRequest> {
-        self.queue.pop_front()
-    }
-
-    pub fn match_count(&self) -> u32 {
-        self.queue.len() as u32
-    }
-}
-
 pub struct MatchController {
-    max_range: u32,
-    queue_map: HashMap<u32, MatchQueue>,
     match_vec: Vec<MatchRequest>,
     last_update_timestamp: i64,
     pe_table: PETable,
@@ -53,8 +19,6 @@ pub struct MatchController {
 impl MatchController {
     pub fn new() -> Self {
         Self {
-            max_range: 0,
-            queue_map: HashMap::new(),
             last_update_timestamp: -1,
             pe_table: PETable::new(),
             match_vec: Vec::new(),
@@ -69,7 +33,6 @@ impl MatchController {
         &mut self,
         curr_timestamp: i64,
     ) -> Option<(Option<MatchRequest>, Option<MatchRequest>)> {
-        println!("更新匹配: {}", curr_timestamp);
         self.last_update_timestamp = curr_timestamp;
 
         let len = self.match_vec.len();
@@ -100,11 +63,9 @@ impl MatchController {
                 }
 
                 // 先判断有没有匹配超时
-                let waited_time = curr_timestamp as f64 - match_req.timestamp as f64;
+                let waited_time = curr_timestamp - match_req.timestamp;
                 let mut use_robot = false;
                 let mut matched = false;
-                let mut ea = 0.0;
-                let mut eb = 0.0;
 
                 // 找到一个潜在的对手后，根据当前玩家等待的时间判断，对手是否满足要求
                 if min_index > 0 {
@@ -113,16 +74,16 @@ impl MatchController {
                             .pe_table
                             .get_ea_eb(match_req.player_elo_score, check_req.player_elo_score);
 
-                        if waited_time <= 1.0 && group <= 0 {
+                        if waited_time <= 1000 && group <= 0 {
                             // 完美匹配
                             matched = true;
-                        } else if waited_time <= 2.5 && group <= 1 {
+                        } else if waited_time <= 2500 && group <= 1 {
                             // 匹配成功
                             matched = true;
-                        } else if waited_time <= 3.5 && group <= 2 {
+                        } else if waited_time <= 3500 && group <= 2 {
                             // 匹配成功
                             matched = true;
-                        } else if waited_time <= 4.5 && group <= 3 {
+                        } else if waited_time <= 4500 && group <= 3 {
                             matched = true;
                         } else {
                             if group <= 4 {
@@ -132,7 +93,7 @@ impl MatchController {
                     }
                 } else {
                     // 没有找到合适的潜在对手，也就是没有玩家了，判断一下时间，超时则使用机器人
-                    if waited_time > 4.5 {
+                    if waited_time > 4500 {
                         matched = true;
                         use_robot = true;
                     }

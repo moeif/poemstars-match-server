@@ -92,7 +92,7 @@ fn main() {
 
     // game server logic loop
     loop {
-        let curr_timestamp = utils::get_timestamp();
+        let curr_timestamp = utils::get_timestamp_millis();
         if let Ok((endpoint_id, json_str)) = rx.try_recv() {
             if let Ok(json_values) = serde_json::from_str::<Value>(&json_str) {
                 if let Some(proto_id) = json_values["proto_id"].as_u64() {
@@ -174,7 +174,7 @@ fn main() {
                 };
 
                 if let Some(start_game_signal) =
-                    match_game_controller.start_new_game(game_player1, game_player2)
+                    match_game_controller.start_new_game(game_player1, game_player2, curr_timestamp)
                 {
                     handler.signals().send(start_game_signal);
                 }
