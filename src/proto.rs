@@ -1,11 +1,14 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub const PROTO_CGSTARTMATCH: u64 = 1001;
 pub const PROTO_GCSTARTMATCH: u64 = 2001;
 pub const PROTO_CGMATCHGAMEOPT: u64 = 1002;
-pub const PROTO_GCUPDATEGAME: u64 = 1003;
+pub const PROTO_GCSTARTGAME: u64 = 2002;
+pub const PROTO_GCUPDATEGAME: u64 = 2003;
+pub const PROTO_GCENDGAME: u64 = 2004;
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct CGStartMatch {
     pub id: String,        // 玩家ID
     pub name: String,      // 玩家昵称
@@ -24,10 +27,7 @@ impl GCStartMatch {
         let proto = GCStartMatch { code };
 
         if let Ok(json_str) = serde_json::to_string(&proto) {
-            let proto_data = ProtoData::new(PROTO_GCSTARTMATCH, json_str);
-            if let Ok(proto_data_json_str) = serde_json::to_string(&proto_data) {
-                return Some(proto_data_json_str);
-            }
+            return ProtoData::new(PROTO_GCSTARTMATCH, json_str);
         }
 
         return None;
@@ -43,7 +43,16 @@ pub struct GCStartGame {
     pub poem_data_str: String,
 }
 
-#[derive(Deserialize)]
+impl GCStartGame {
+    pub fn gc_to_json(&self) -> Option<String> {
+        if let Ok(json_str) = serde_json::to_string(self) {
+            return ProtoData::new(PROTO_GCSTARTGAME, json_str);
+        }
+        return None;
+    }
+}
+
+#[derive(Deserialize, Debug)]
 pub struct CGMatchGameOpt {
     pub id: String,      // 玩家ID
     pub game_id: String, // 游戏ID
@@ -64,6 +73,15 @@ pub struct GCUpdateGame {
     pub player2_opt_bitmap: u32,
 }
 
+impl GCUpdateGame {
+    pub fn gc_to_json(&self) -> Option<String> {
+        if let Ok(json_str) = serde_json::to_string(self) {
+            return ProtoData::new(PROTO_GCUPDATEGAME, json_str);
+        }
+        return None;
+    }
+}
+
 #[derive(Serialize)]
 pub struct GCEndGame {
     pub game_id: String,
@@ -81,17 +99,34 @@ pub struct GCEndGame {
     pub player2_new_level: u32,
 }
 
+impl GCEndGame {
+    pub fn gc_to_json(&self) -> Option<String> {
+        if let Ok(json_str) = serde_json::to_string(self) {
+            return ProtoData::new(PROTO_GCENDGAME, json_str);
+        }
+        return None;
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct ProtoData {
     pub proto_id: u64,
-    pub proto_json_str: String,
+    pub proto_json_str: Value,
 }
 
 impl ProtoData {
-    pub fn new(proto_id: u64, json_str: String) -> Self {
-        Self {
-            proto_id,
-            proto_json_str: json_str,
+    pub fn new(proto_id: u64, json_str: String) -> Option<String> {
+        if let Ok(json_value) = serde_json::from_str::<Value>(&json_str) {
+            let proto_data = Self {
+                proto_id: proto_id,
+                proto_json_str: json_value,
+            };
+
+            if let Ok(proto_json_str) = serde_json::to_string(&proto_data) {
+                return Some(proto_json_str);
+            }
         }
+
+        return None;
     }
 }

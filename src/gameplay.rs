@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 const MATCH_POEM_NUM: u32 = 10;
 
+#[derive(Debug)]
 pub struct Player {
     endpoint_id: Option<String>,
     player_id: String,
@@ -40,7 +41,7 @@ impl Player {
             if self.last_opt_index + 1 == opt.opt_index as i32 {
                 self.last_opt_index += 1;
                 self.opt_bitmap |= opt.opt_result << self.last_opt_index;
-
+                log::info!("On Player {} OPT", self.player_name);
                 if opt.opt_result == 0 {
                     // 在答对的情况下，计算得分
                     let server_index_start_timestamp =
@@ -53,6 +54,8 @@ impl Player {
                         self.game_score += got_score;
                     }
                 }
+            } else {
+                log::error!("OPT failed with index!");
             }
         }
         self.is_dirty = true;
@@ -76,7 +79,7 @@ impl Player {
                     self.opt_bitmap |= opt_result << self.last_opt_index;
                     self.is_dirty = true;
                     robot.set_next_opt_wait_time(poem_mill_time);
-
+                    log::info!("ROBOT {} auto OPT!", self.player_name);
                     if opt_result == 0 {
                         // 在答对的情况下，计算得分
                         let passed_time = curr_timestamp - server_index_start_timestamp;
@@ -97,6 +100,7 @@ impl Player {
             self.last_opt_index += 1;
             self.opt_bitmap |= 1 << self.last_opt_index;
             self.is_dirty = true;
+            log::info!("Player {} OPT Timeout, Auto Failed!", self.player_name);
         }
     }
 
@@ -206,15 +210,7 @@ impl Game {
             player2_opt_bitmap: self.player2.opt_bitmap,
         };
 
-        if let Ok(json_str) = serde_json::to_string(&gc_update_game) {
-            if let Ok(proto_data_json_str) =
-                serde_json::to_string(&proto::ProtoData::new(proto::PROTO_GCUPDATEGAME, json_str))
-            {
-                return Some(proto_data_json_str);
-            }
-        }
-
-        return None;
+        return gc_update_game.gc_to_json();
     }
 
     fn gc_end_game_to_json(&mut self, petable: &PETable) -> Option<String> {
@@ -256,11 +252,7 @@ impl Game {
             player2_new_level: self.player2.player_level,
         };
 
-        if let Ok(json_str) = serde_json::to_string(&gc_end_game) {
-            return Some(json_str);
-        }
-
-        return None;
+        return gc_end_game.gc_to_json();
     }
 }
 
@@ -314,7 +306,9 @@ impl MatchGameController {
             game.update_end_status();
 
             if game.is_dirty() {
+                log::info!("Game {} data is dirty!", game.id);
                 if let Some(proto_json_str) = game.gc_update_to_json() {
+                    log::info!("Sync game {} data -> Client!", game.id);
                     let signal = Signal::Sync(
                         game.player1.endpoint_id.clone(),
                         game.player2.endpoint_id.clone(),
@@ -332,9 +326,11 @@ impl MatchGameController {
             }
 
             if game.is_game_end() {
+                log::info!("Game {} is END!", game.id);
                 self.ended_game.push(game.id.clone());
 
                 if let Some(proto_json_str) = game.gc_end_game_to_json(&self.petable) {
+                    log::info!("Sync game {} END data -> Client!", game.id);
                     let signal = Signal::Sync(
                         game.player1.endpoint_id.clone(),
                         game.player2.endpoint_id.clone(),
@@ -356,23 +352,40 @@ impl MatchGameController {
                     game.player1.player_level,
                 )) {
                     // data send ok
+                    log::info!(
+                        "Player1 {}, name: {}, level {}, data is Sync to Redis",
+                        game.player1.player_id,
+                        game.player1.player_name,
+                        game.player1.player_level
+                    );
                 } else {
                     // Channel send msg error
+                    log::error!("Send player1 name level to Redis failed!");
                 }
-                // 将第一个玩家的数据也发到另一线程，存Redis
+                // 将第2个玩家的数据也发到另一线程，存Redis
                 if let Ok(()) = self.tx.send((
                     format!("{}_{}", &game.player2.player_id, &game.player2.player_name),
                     game.player2.player_level,
                 )) {
                     // data send ok
+                    log::info!(
+                        "Player2 {}, name: {}, level {}, data is Sync to Redis",
+                        game.player2.player_id,
+                        game.player2.player_name,
+                        game.player2.player_level
+                    );
                 } else {
                     // Channel send msg error
+                    log::error!("Send player2 name level to Redis failed!");
                 }
             }
         }
 
         for game_id in self.ended_game.iter() {
-            self.game_map.remove(game_id);
+            log::info!("Remove Ended Game: {}", game_id);
+            if let Some(game) = self.game_map.remove(game_id) {
+                log::info!("Game {} has Removed!", game.id);
+            }
         }
 
         return some_signal_vec;
@@ -384,6 +397,7 @@ impl MatchGameController {
         player2: Player,
         curr_timestamp: i64,
     ) -> Option<Signal> {
+        log::info!("Try Start a new Game!");
         let player_level = player1.player_level;
         if let Some(poem_json_str) = self
             .poem_table
@@ -403,7 +417,7 @@ impl MatchGameController {
             };
 
             // 创建消息同步 Signal
-            if let Ok(gc_start_game_json_str) = serde_json::to_string(&gc_start_game) {
+            if let Some(gc_start_game_json_str) = gc_start_game.gc_to_json() {
                 let signal = Signal::Sync(
                     player1.endpoint_id.clone(),
                     player2.endpoint_id.clone(),
@@ -414,10 +428,10 @@ impl MatchGameController {
                 self.game_map.insert(game.id.clone(), game);
                 return Some(signal);
             } else {
-                println!("创建GCStartGame消息时Json序列化失败，无法进行游戏!");
+                log::error!("创建GCStartGame消息时Json序列化失败，无法进行游戏!");
             }
         } else {
-            println!("诗词数据生成失败，无法进行游戏!");
+            log::error!("诗词数据生成失败，无法进行游戏!");
         }
 
         return None;
@@ -435,7 +449,7 @@ impl MatchGameController {
             competitor_player.player_correct_rate,
             poem_mill_time,
         );
-        Player {
+        let player = Player {
             endpoint_id: None,
             player_id: robot.id.clone(),
             player_name: robot.name.clone(),
@@ -448,12 +462,14 @@ impl MatchGameController {
             is_dirty: false,
             robot: Some(robot),
             game_score: 0,
-        }
+        };
+        log::info!("ROBOT player created: {:?}", player);
+        return player;
     }
 }
 
 pub fn create_player_from_match(match_reqeust: MatchRequest, curr_timestamp: i64) -> Player {
-    Player {
+    let player = Player {
         endpoint_id: match_reqeust.endpoint_id,
         player_id: match_reqeust.player_id,
         player_name: match_reqeust.player_name,
@@ -466,5 +482,7 @@ pub fn create_player_from_match(match_reqeust: MatchRequest, curr_timestamp: i64
         is_dirty: false,
         robot: None,
         game_score: 0,
-    }
+    };
+    log::info!("Real Player Created: {:?}", player);
+    return player;
 }

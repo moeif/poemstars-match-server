@@ -24,6 +24,31 @@ fn main() {
 
     let (tx_for_server, rx_for_game_loop) = mpsc::channel();
     let (tx_for_game_loop, rx_for_redis_handler) = mpsc::channel();
+    // --------------------------- Debug ------------------------
+    let tx_for_server_clone = tx_for_server.clone();
+    thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_secs(5));
+        let endpoint_id = String::new();
+        let cg_start_match = proto::CGStartMatch {
+            id: "FakePlayerID".to_string(),
+            name: "假玩家".to_string(),
+            level: 3,
+            elo_score: 128,
+            correct_rate: 78.0,
+        };
+        if let Ok(cg_match_json_str) = serde_json::to_string(&cg_start_match) {
+            if let Some(proto_json_str) =
+                proto::ProtoData::new(proto::PROTO_CGSTARTMATCH, cg_match_json_str)
+            {
+                log::info!("发送匹配请求");
+                if let Ok(_) = tx_for_server_clone.send((endpoint_id, proto_json_str)) {
+                } else {
+                    log::error!("发送匹配请求失败");
+                }
+            }
+        }
+    });
+    // ----------------------------------------------------------
 
     let (handler, listener) = node::split();
     start_redis_handler(
@@ -128,13 +153,21 @@ fn start_game_loop(
         config.poem_score,
     );
 
+    let mut last_update_timestamp: i64 = -1;
+
     // game server logic loop
     loop {
         let curr_timestamp = utils::get_timestamp_millis();
         if let Ok((endpoint_id, json_str)) = rx_from_server.try_recv() {
+            log::info!(
+                "Received Channel Info From Server: {} - {}",
+                endpoint_id,
+                json_str
+            );
             if let Ok(json_values) = serde_json::from_str::<Value>(&json_str) {
                 if let Some(proto_id) = json_values["proto_id"].as_u64() {
-                    if let Some(proto_json_str) = json_values["proto_json_str"].as_str() {
+                    if json_values["proto_json_str"].is_object() {
+                        let proto_json_str = &json_values["proto_json_str"].to_string();
                         match proto_id {
                             proto::PROTO_CGSTARTMATCH => {
                                 if let Ok(match_info) =
@@ -144,7 +177,11 @@ fn start_game_loop(
                                         let start_match_timestamp = curr_timestamp;
 
                                         let match_request = gamematch::MatchRequest {
-                                            endpoint_id: Some(endpoint_id.clone()),
+                                            endpoint_id: if endpoint_id.is_empty() {
+                                                None
+                                            } else {
+                                                Some(endpoint_id.clone())
+                                            },
                                             player_id: match_info.id.clone(),
                                             player_name: match_info.name.clone(),
                                             player_level: match_info.level,
@@ -160,22 +197,41 @@ fn start_game_loop(
                                         if let Some(proto_json_str) =
                                             proto::GCStartMatch::gc_to_json(0)
                                         {
-                                            handler.signals().send(common::Signal::Send(
-                                                endpoint_id,
-                                                proto_json_str,
-                                            ));
+                                            if !endpoint_id.is_empty() {
+                                                log::info!(
+                                                    "Response CGStartMatch -> Client: {}",
+                                                    endpoint_id
+                                                );
+                                                handler.signals().send(common::Signal::Send(
+                                                    endpoint_id,
+                                                    proto_json_str,
+                                                ));
+                                            }
                                         }
                                     } else {
                                         // 玩家当前已经在匹配或游戏中，暂时不让进了，直接回复匹配失败
+                                        log::warn!(
+                                            "Client {} is in game, match failed!",
+                                            endpoint_id,
+                                        );
                                         if let Some(proto_json_str) =
                                             proto::GCStartMatch::gc_to_json(-1)
                                         {
-                                            handler.signals().send(common::Signal::Send(
-                                                endpoint_id,
-                                                proto_json_str,
-                                            ));
+                                            log::info!(
+                                                "Response CGStartMatch Failed -> Client: {}",
+                                                endpoint_id
+                                            );
+
+                                            if !endpoint_id.is_empty() {
+                                                handler.signals().send(common::Signal::Send(
+                                                    endpoint_id,
+                                                    proto_json_str,
+                                                ));
+                                            }
                                         }
                                     }
+                                } else {
+                                    log::error!("CGStartMatch 反序列化失败!");
                                 }
                             }
                             proto::PROTO_CGMATCHGAMEOPT => {
@@ -183,45 +239,59 @@ fn start_game_loop(
                                     serde_json::from_str::<proto::CGMatchGameOpt>(proto_json_str)
                                 {
                                     match_game_controller.on_opt(opt_info, curr_timestamp);
+                                } else {
+                                    log::error!(
+                                        "ERROR!, Received Game OPT, but deserialize failed: {:?}",
+                                        proto_json_str
+                                    );
                                 }
                             }
                             _ => {}
                         }
                     }
-                }
-            }
-        }
-
-        if let Some(sync_signal_vec) = match_game_controller.update_games(curr_timestamp) {
-            // 同步游戏
-            for signal in sync_signal_vec {
-                handler.signals().send(signal);
-            }
-        }
-
-        if let Some((some_match_request1, some_match_request2)) =
-            match_controller.update_matches(curr_timestamp)
-        {
-            if let Some(match_request1) = some_match_request1 {
-                let game_player1 =
-                    gameplay::create_player_from_match(match_request1, curr_timestamp);
-                let game_player2 = if let Some(match_request2) = some_match_request2 {
-                    gameplay::create_player_from_match(match_request2, curr_timestamp)
                 } else {
-                    match_game_controller.create_robot_player(
-                        &game_player1,
-                        curr_timestamp,
-                        config.poem_mill_time,
-                    )
-                };
-
-                if let Some(start_game_signal) =
-                    match_game_controller.start_new_game(game_player1, game_player2, curr_timestamp)
-                {
-                    handler.signals().send(start_game_signal);
+                    log::error!("JsonValue中找不到 proto_id 字段!");
                 }
             } else {
-                log::error!("逻辑错误，匹配返回Some时第一个玩家不可能为None");
+                log::error!("反序列化 ProtoData->Value 失败");
+            }
+        }
+
+        if last_update_timestamp < 0 || curr_timestamp - last_update_timestamp > 33 {
+            last_update_timestamp = curr_timestamp;
+            if let Some(sync_signal_vec) = match_game_controller.update_games(curr_timestamp) {
+                // 同步游戏
+                for signal in sync_signal_vec {
+                    handler.signals().send(signal);
+                }
+            }
+
+            if let Some((some_match_request1, some_match_request2)) =
+                match_controller.update_matches(curr_timestamp)
+            {
+                if let Some(match_request1) = some_match_request1 {
+                    let game_player1 =
+                        gameplay::create_player_from_match(match_request1, curr_timestamp);
+                    let game_player2 = if let Some(match_request2) = some_match_request2 {
+                        gameplay::create_player_from_match(match_request2, curr_timestamp)
+                    } else {
+                        match_game_controller.create_robot_player(
+                            &game_player1,
+                            curr_timestamp,
+                            config.poem_mill_time,
+                        )
+                    };
+
+                    if let Some(start_game_signal) = match_game_controller.start_new_game(
+                        game_player1,
+                        game_player2,
+                        curr_timestamp,
+                    ) {
+                        handler.signals().send(start_game_signal);
+                    }
+                } else {
+                    log::error!("逻辑错误，匹配返回Some时第一个玩家不可能为None");
+                }
             }
         }
     }
@@ -232,23 +302,28 @@ fn start_redis_handler(
     match_data_key_name: String,
     rx: std::sync::mpsc::Receiver<(std::string::String, u32)>,
 ) {
-    let client = redis::Client::open("redis://127.0.0.1/").unwrap();
+    let client = redis::Client::open("redis://127.0.0.1:6379").unwrap();
     let mut conn = client.get_connection().unwrap();
     thread::spawn(move || {
         log::info!("Redis Handler Start!");
-        if let Ok((player_id, player_level)) = rx.try_recv() {
-            if let Ok(_result) =
-                conn.zadd::<&str, u32, &str, usize>(&match_data_key_name, &player_id, player_level)
-            {
-                log::info!("玩家 {}, level: {} 数据添加成功!", player_id, player_level);
-                // 数据添加成功
-            } else {
-                // Log 数据添加失败
-                log::info!(
-                    "!!!!!!!! 玩家 {}, level: {} 数据添加失败!",
-                    player_id,
-                    player_level
-                );
+        loop {
+            if let Ok((player_id, player_level)) = rx.recv() {
+                log::info!("Redis线程收到数据: {} - {}", player_id, player_level);
+                if let Ok(_result) = conn.zadd::<&str, u32, &str, usize>(
+                    &match_data_key_name,
+                    &player_id,
+                    player_level,
+                ) {
+                    log::info!("玩家 {}, level: {} 数据添加成功!", player_id, player_level);
+                    // 数据添加成功
+                } else {
+                    // Log 数据添加失败
+                    log::info!(
+                        "!!!!!!!! 玩家 {}, level: {} 数据添加失败!",
+                        player_id,
+                        player_level
+                    );
+                }
             }
         }
     });

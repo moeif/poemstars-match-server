@@ -4,6 +4,7 @@ use rand::Rng;
 const MIN_CORRECTION_PERCENT: f64 = 20.0;
 const MAX_CORRECTION_PERCENT: f64 = 90.0;
 
+#[derive(Debug)]
 pub struct Robot {
     pub id: String,
     pub name: String,

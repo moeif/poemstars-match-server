@@ -1,5 +1,6 @@
 use crate::petable::PETable;
 
+#[derive(Debug)]
 pub struct MatchRequest {
     pub endpoint_id: Option<String>,
     pub player_id: String,
@@ -26,6 +27,7 @@ impl MatchController {
     }
 
     pub fn add_match(&mut self, match_request: MatchRequest) {
+        log::info!("New Match added: {:?}", match_request);
         self.match_vec.push(match_request);
     }
 
@@ -34,13 +36,13 @@ impl MatchController {
         curr_timestamp: i64,
     ) -> Option<(Option<MatchRequest>, Option<MatchRequest>)> {
         // self.last_update_timestamp = curr_timestamp;
-
         let len = self.match_vec.len();
+        // log::info!("Update matches!, {}, len: {}", curr_timestamp, len);
         if len == 0 {
             return None;
         }
 
-        for imain in 0..(len - 1) {
+        for imain in 0..len {
             let mut min_index = -1;
             let mut min_score_diff = 0;
             if let Some(match_req) = self.match_vec.get(imain) {
@@ -67,6 +69,8 @@ impl MatchController {
                 let mut use_robot = false;
                 let mut matched = false;
 
+                log::info!("waited_time: {}", waited_time);
+
                 // 找到一个潜在的对手后，根据当前玩家等待的时间判断，对手是否满足要求
                 if min_index > 0 {
                     if let Some(check_req) = self.match_vec.get(min_index as usize) {
@@ -75,18 +79,23 @@ impl MatchController {
                             .get_ea_eb(match_req.player_elo_score, check_req.player_elo_score);
 
                         if waited_time <= 1000 && group <= 0 {
+                            log::info!("MATCHED!, waited_time < 1000, group <= 0");
                             // 完美匹配
                             matched = true;
                         } else if waited_time <= 2500 && group <= 1 {
+                            log::info!("MATCHED!, waited_time < 2500, group <= 1");
                             // 匹配成功
                             matched = true;
                         } else if waited_time <= 3500 && group <= 2 {
+                            log::info!("MATCHED!, waited_time < 3500, group <= 2");
                             // 匹配成功
                             matched = true;
                         } else if waited_time <= 4500 && group <= 3 {
+                            log::info!("MATCHED!, waited_time < 4500 group <= 3");
                             matched = true;
                         } else {
                             if group <= 4 {
+                                log::info!("MATCHED! group <= 4");
                                 matched = true;
                             }
                         }
@@ -94,6 +103,7 @@ impl MatchController {
                 } else {
                     // 没有找到合适的潜在对手，也就是没有玩家了，判断一下时间，超时则使用机器人
                     if waited_time > 4500 {
+                        log::info!("Match Failed!, USE ROBOT!");
                         matched = true;
                         use_robot = true;
                     }

@@ -83,8 +83,6 @@ impl PoemTable {
             }
         }
 
-        println!("Poem Level Sum: {}", sum);
-
         // 设置不同玩家的等级在匹配玩法中可以从哪些关卡中随机生成
         let mut id_vec_map: HashMap<u32, Vec<u32>> = HashMap::new();
         id_vec_map.insert(1, (1..=20).collect());
