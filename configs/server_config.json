@@ -1,6 +1,7 @@
 {
-    "lang": "zh",
+    "area": "zh",
     "port": 3044,
     "poem_mill_time": 10000,
-    "poem_score": 1000
+    "poem_score": 1000,
+    "match_data_key_name": "PoemStarsMatchKill"
 }

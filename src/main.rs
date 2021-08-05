@@ -12,19 +12,24 @@ mod petable;
 mod poemtable;
 mod proto;
 mod robot;
+mod robottable;
 mod utils;
 extern crate redis;
 use redis::Commands;
+extern crate log4rs;
 
 fn main() {
+    log4rs::init_file("log4rs.yml", Default::default()).unwrap();
     let server_config = config::ServerConfig::new();
-    // println!("{:#?}", server_config);
 
     let (tx_for_server, rx_for_game_loop) = mpsc::channel();
     let (tx_for_game_loop, rx_for_redis_handler) = mpsc::channel();
 
     let (handler, listener) = node::split();
-    start_redis_handler(&server_config.lang, rx_for_redis_handler);
+    start_redis_handler(
+        server_config.match_data_key_name.clone(),
+        rx_for_redis_handler,
+    );
     start_server(handler.clone(), listener, tx_for_server, server_config.port);
     start_game_loop(handler, tx_for_game_loop, rx_for_game_loop, &server_config);
 }
@@ -42,18 +47,18 @@ fn start_server(
             .network()
             .listen(Transport::Ws, &format!("0.0.0.0:{}", port))
         {
-            println!("WebSocket Server Started!");
+            log::info!("WebSocket Server Started!");
             let mut clients = HashMap::new();
             listener.for_each(move |event| match event {
                 NodeEvent::Network(net_event) => match net_event {
                     NetEvent::Connected(_, _) => unreachable!(),
                     NetEvent::Accepted(_endpoint, _listener) => {
-                        println!("Client connected: {:?}", _endpoint.resource_id());
+                        log::info!("Client connected: {:?}", _endpoint.resource_id());
                         let endpoint_id = _endpoint.resource_id().to_string();
                         clients.insert(endpoint_id, _endpoint);
                     }
                     NetEvent::Message(endpoint, data) => {
-                        println!(
+                        log::info!(
                             "Server Received: {:?}, data: {:?}",
                             endpoint.resource_id(),
                             String::from_utf8_lossy(data)
@@ -63,28 +68,30 @@ fn start_server(
                             let endpoint_id = endpoint.resource_id().to_string();
                             if let Ok(()) = tx.send((endpoint_id, json_str.to_string())) {
                             } else {
-                                println!("channel send error!");
+                                log::error!("channel send error!");
                             }
                         }
                     }
                     NetEvent::Disconnected(_endpoint) => {
                         let endpoint_id = _endpoint.resource_id().to_string();
-                        println!("Client disconnected: {:?}", endpoint_id);
+                        log::info!("Client disconnected: {:?}", endpoint_id);
                         clients.remove(&endpoint_id);
                     }
                 },
                 NodeEvent::Signal(signal) => match signal {
                     common::Signal::Send(endpoint_id, json_str) => {
-                        println!("Send Msg to client: {} - {}", endpoint_id, json_str);
+                        log::info!("Send Msg to client: {} - {}", endpoint_id, json_str);
                         if let Some(client_endpoint) = clients.get(&endpoint_id) {
                             let data = json_str.as_bytes();
                             server_handler.network().send(*client_endpoint, data);
                         }
                     }
                     common::Signal::Sync(endpoint_id1, endpoint_id2, json_str) => {
-                        println!(
+                        log::info!(
                             "Sync to client: {:?} - {:?} - {}",
-                            endpoint_id1, endpoint_id2, json_str
+                            endpoint_id1,
+                            endpoint_id2,
+                            json_str
                         );
                         let data = json_str.as_bytes();
                         if let Some(endpoint_id1) = endpoint_id1 {
@@ -111,7 +118,7 @@ fn start_game_loop(
     rx_from_server: std::sync::mpsc::Receiver<(std::string::String, std::string::String)>,
     config: &config::ServerConfig,
 ) {
-    println!("Game Loop Started!");
+    log::info!("Game Loop Started!");
     // 当前在游戏中的玩家，开始匹配的时间
     let mut gaming_player_map: HashMap<String, i64> = HashMap::new();
     let mut match_controller = gamematch::MatchController::new();
@@ -214,38 +221,33 @@ fn start_game_loop(
                     handler.signals().send(start_game_signal);
                 }
             } else {
-                println!("逻辑错误，匹配返回Some时第一个玩家不可能为None");
+                log::error!("逻辑错误，匹配返回Some时第一个玩家不可能为None");
             }
         }
     }
 }
 
 // lang, player_id, player_level
-fn start_redis_handler(lang: &str, rx: std::sync::mpsc::Receiver<(std::string::String, u32)>) {
-    const MATCH_DATA_KEY_NAME: &str = "PoemStarsMatchKill";
-    const MATCH_DATA_EN_KEY_NAME: &str = "PoemStarsEnMatchKill";
-
-    let match_data_key = if lang == "zh" {
-        MATCH_DATA_KEY_NAME
-    } else {
-        MATCH_DATA_EN_KEY_NAME
-    };
-
+fn start_redis_handler(
+    match_data_key_name: String,
+    rx: std::sync::mpsc::Receiver<(std::string::String, u32)>,
+) {
     let client = redis::Client::open("redis://127.0.0.1/").unwrap();
     let mut conn = client.get_connection().unwrap();
     thread::spawn(move || {
-        println!("Redis Handler Start!");
+        log::info!("Redis Handler Start!");
         if let Ok((player_id, player_level)) = rx.try_recv() {
             if let Ok(_result) =
-                conn.zadd::<&str, u32, &str, usize>(match_data_key, &player_id, player_level)
+                conn.zadd::<&str, u32, &str, usize>(&match_data_key_name, &player_id, player_level)
             {
-                println!("玩家 {}, level: {} 数据添加成功!", player_id, player_level);
+                log::info!("玩家 {}, level: {} 数据添加成功!", player_id, player_level);
                 // 数据添加成功
             } else {
                 // Log 数据添加失败
-                println!(
+                log::info!(
                     "!!!!!!!! 玩家 {}, level: {} 数据添加失败!",
-                    player_id, player_level
+                    player_id,
+                    player_level
                 );
             }
         }

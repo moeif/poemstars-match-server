@@ -1,3 +1,4 @@
+use crate::robottable::RobotTable;
 use rand::Rng;
 
 const MIN_CORRECTION_PERCENT: f64 = 20.0;
@@ -32,15 +33,19 @@ impl Robot {
     }
 }
 
-pub struct RobotController {}
+pub struct RobotController {
+    robottable: RobotTable,
+}
 
 impl RobotController {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            robottable: RobotTable::new(),
+        }
     }
 
     pub fn get_robot(
-        &self,
+        &mut self,
         competitor_level: u32,
         competitor_elo_score: u32,
         competitor_correct_rate: f64,
@@ -59,9 +64,11 @@ impl RobotController {
             }
         };
 
+        let (id, name) = self.robottable.get_id_name();
+
         let mut robot = Robot {
-            id: "tmp_robot_id".to_string(),
-            name: "tmp_robot_name".to_string(),
+            id,
+            name,
             level: competitor_level,
             elo_score: my_score as u32,
             correct_rate: if competitor_correct_rate < MIN_CORRECTION_PERCENT {
@@ -75,5 +82,9 @@ impl RobotController {
         };
         robot.set_next_opt_wait_time(max_opt_wait_time);
         return robot;
+    }
+
+    pub fn back_robot(&mut self, robot: Robot) {
+        self.robottable.back_id_name(robot.id, robot.name);
     }
 }

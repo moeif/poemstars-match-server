@@ -12,14 +12,14 @@ pub struct MatchRequest {
 
 pub struct MatchController {
     match_vec: Vec<MatchRequest>,
-    last_update_timestamp: i64,
+    // last_update_timestamp: i64,
     pe_table: PETable,
 }
 
 impl MatchController {
     pub fn new() -> Self {
         Self {
-            last_update_timestamp: -1,
+            // last_update_timestamp: -1,
             pe_table: PETable::new(),
             match_vec: Vec::new(),
         }
@@ -33,7 +33,7 @@ impl MatchController {
         &mut self,
         curr_timestamp: i64,
     ) -> Option<(Option<MatchRequest>, Option<MatchRequest>)> {
-        self.last_update_timestamp = curr_timestamp;
+        // self.last_update_timestamp = curr_timestamp;
 
         let len = self.match_vec.len();
         if len == 0 {

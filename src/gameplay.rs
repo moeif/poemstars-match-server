@@ -4,7 +4,6 @@ use crate::petable::PETable;
 use crate::poemtable::PoemTable;
 use crate::proto;
 use crate::robot::{Robot, RobotController};
-use lazy_static::*;
 use std::collections::HashMap;
 
 const MATCH_POEM_NUM: u32 = 10;
@@ -425,7 +424,7 @@ impl MatchGameController {
     }
 
     pub fn create_robot_player(
-        &self,
+        &mut self,
         competitor_player: &Player,
         curr_timestamp: i64,
         poem_mill_time: i64,

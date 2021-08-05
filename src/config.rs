@@ -4,10 +4,11 @@ use std::io::prelude::*;
 
 #[derive(Debug, Deserialize)]
 pub struct ServerConfig {
-    pub lang: String,
+    pub area: String,
     pub port: u32,
     pub poem_mill_time: i64,
     pub poem_score: u32,
+    pub match_data_key_name: String,
 }
 
 impl ServerConfig {
