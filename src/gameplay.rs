@@ -1,4 +1,4 @@
-use crate::common::Signal;
+use crate::common::{RedisOpt, Signal};
 use crate::gamematch::MatchRequest;
 use crate::petable::PETable;
 use crate::poemtable::PoemTable;
@@ -236,14 +236,14 @@ pub struct MatchGameController {
     poem_table: PoemTable,
     petable: PETable,
     robot_ctrl: RobotController,
-    tx: std::sync::mpsc::Sender<(std::string::String, u32)>,
+    tx: std::sync::mpsc::Sender<RedisOpt>,
     poem_mill_time: i64,
     poem_score: u32,
 }
 
 impl MatchGameController {
     pub fn new(
-        tx: std::sync::mpsc::Sender<(std::string::String, u32)>,
+        tx: std::sync::mpsc::Sender<RedisOpt>,
         poem_mill_time: i64,
         poem_score: u32,
     ) -> Self {
@@ -320,7 +320,7 @@ impl MatchGameController {
                 }
 
                 // 将玩家的id和名字，以及分数发到另一线程，用于存到Redis里
-                if let Ok(()) = self.tx.send((
+                if let Ok(()) = self.tx.send(RedisOpt::GamePlayerData(
                     format!("{}_{}", &game.player1.player_id, &game.player1.player_name),
                     game.player1.player_level,
                 )) {
@@ -336,7 +336,7 @@ impl MatchGameController {
                     log::error!("Send player1 name level to Redis failed!");
                 }
                 // 将第2个玩家的数据也发到另一线程，存Redis
-                if let Ok(()) = self.tx.send((
+                if let Ok(()) = self.tx.send(RedisOpt::GamePlayerData(
                     format!("{}_{}", &game.player2.player_id, &game.player2.player_name),
                     game.player2.player_level,
                 )) {
@@ -360,6 +360,9 @@ impl MatchGameController {
                 log::info!("Game {} has Removed!", game.id);
             }
         }
+
+        let game_num = self.game_map.len();
+        if let Ok(()) = self.tx.send(RedisOpt::GameStatus(game_num as u32)) {}
 
         return some_signal_vec;
     }
@@ -404,6 +407,10 @@ impl MatchGameController {
 
                 let game = Game::new(player1, player2, curr_timestamp);
                 self.game_map.insert(game.id.clone(), game);
+
+                let game_num = self.game_map.len();
+                if let Ok(()) = self.tx.send(RedisOpt::GameStatus(game_num as u32)) {}
+
                 return Some(signal);
             } else {
                 log::error!("创建GCStartGame消息时Json序列化失败，无法进行游戏!");

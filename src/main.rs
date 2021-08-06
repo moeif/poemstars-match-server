@@ -23,31 +23,31 @@ fn main() {
     let server_config = config::ServerConfig::new();
 
     let (tx_for_server, rx_for_game_loop) = mpsc::channel();
-    let (tx_for_game_loop, rx_for_redis_handler) = mpsc::channel();
+    let (tx_redis, rx_for_redis_handler) = mpsc::channel();
     // --------------------------- Debug ------------------------
-    // let tx_for_server_clone = tx_for_server.clone();
-    // thread::spawn(move || {
-    //     thread::sleep(std::time::Duration::from_secs(5));
-    //     let endpoint_id = String::new();
-    //     let cg_start_match = proto::CGStartMatch {
-    //         id: "FakePlayerID".to_string(),
-    //         name: "假玩家".to_string(),
-    //         level: 3,
-    //         elo_score: 128,
-    //         correct_rate: 78.0,
-    //     };
-    //     if let Ok(cg_match_json_str) = serde_json::to_string(&cg_start_match) {
-    //         if let Some(proto_json_str) =
-    //             proto::ProtoData::new(proto::PROTO_CGSTARTMATCH, cg_match_json_str)
-    //         {
-    //             log::info!("发送匹配请求");
-    //             if let Ok(_) = tx_for_server_clone.send((endpoint_id, proto_json_str)) {
-    //             } else {
-    //                 log::error!("发送匹配请求失败");
-    //             }
-    //         }
-    //     }
-    // });
+    let tx_for_server_clone = tx_for_server.clone();
+    thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_secs(5));
+        let endpoint_id = String::new();
+        let cg_start_match = proto::CGStartMatch {
+            id: "FakePlayerID".to_string(),
+            name: "假玩家".to_string(),
+            level: 3,
+            elo_score: 128,
+            correct_rate: 78.0,
+        };
+        if let Ok(cg_match_json_str) = serde_json::to_string(&cg_start_match) {
+            if let Some(proto_json_str) =
+                proto::ProtoData::new(proto::PROTO_CGSTARTMATCH, cg_match_json_str)
+            {
+                log::info!("发送匹配请求");
+                if let Ok(_) = tx_for_server_clone.send((endpoint_id, proto_json_str)) {
+                } else {
+                    log::error!("发送匹配请求失败");
+                }
+            }
+        }
+    });
     // ----------------------------------------------------------
 
     let (handler, listener) = node::split();
@@ -55,14 +55,21 @@ fn main() {
         server_config.match_data_key_name.clone(),
         rx_for_redis_handler,
     );
-    start_server(handler.clone(), listener, tx_for_server, server_config.port);
-    start_game_loop(handler, tx_for_game_loop, rx_for_game_loop, &server_config);
+    start_server(
+        handler.clone(),
+        listener,
+        tx_for_server,
+        tx_redis.clone(),
+        server_config.port,
+    );
+    start_game_loop(handler, tx_redis.clone(), rx_for_game_loop, &server_config);
 }
 
 fn start_server(
     server_handler: message_io::node::NodeHandler<common::Signal>,
     listener: message_io::node::NodeListener<common::Signal>,
     tx: std::sync::mpsc::Sender<(std::string::String, std::string::String)>,
+    tx_redis: std::sync::mpsc::Sender<common::RedisOpt>,
     port: u32,
 ) {
     thread::spawn(move || {
@@ -85,6 +92,10 @@ fn start_server(
                             _endpoint.resource_id(),
                             clients.len()
                         );
+                        if let Ok(()) =
+                            tx_redis.send(common::RedisOpt::ServerStatus(clients.len() as u32))
+                        {
+                        }
                     }
                     NetEvent::Message(endpoint, data) => {
                         log::info!(
@@ -109,6 +120,10 @@ fn start_server(
                             endpoint_id,
                             clients.len()
                         );
+                        if let Ok(()) =
+                            tx_redis.send(common::RedisOpt::ServerStatus(clients.len() as u32))
+                        {
+                        }
                     }
                 },
                 NodeEvent::Signal(signal) => match signal {
@@ -147,7 +162,7 @@ fn start_server(
 
 fn start_game_loop(
     handler: message_io::node::NodeHandler<common::Signal>,
-    tx_to_redis_handler: std::sync::mpsc::Sender<(std::string::String, u32)>,
+    tx_to_redis_handler: std::sync::mpsc::Sender<common::RedisOpt>,
     rx_from_server: std::sync::mpsc::Receiver<(std::string::String, std::string::String)>,
     config: &config::ServerConfig,
 ) {
@@ -308,29 +323,39 @@ fn start_game_loop(
 // lang, player_id, player_level
 fn start_redis_handler(
     match_data_key_name: String,
-    rx: std::sync::mpsc::Receiver<(std::string::String, u32)>,
+    rx: std::sync::mpsc::Receiver<common::RedisOpt>,
 ) {
     let client = redis::Client::open("redis://127.0.0.1:6379").unwrap();
     let mut conn = client.get_connection().unwrap();
     thread::spawn(move || {
         log::info!("Redis Handler Start!");
         loop {
-            if let Ok((player_id, player_level)) = rx.recv() {
-                log::info!("Redis线程收到数据: {} - {}", player_id, player_level);
-                if let Ok(_result) = conn.zadd::<&str, u32, &str, usize>(
-                    &match_data_key_name,
-                    &player_id,
-                    player_level,
-                ) {
-                    log::info!("玩家 {}, level: {} 数据添加成功!", player_id, player_level);
-                    // 数据添加成功
-                } else {
-                    // Log 数据添加失败
-                    log::info!(
-                        "!!!!!!!! 玩家 {}, level: {} 数据添加失败!",
-                        player_id,
-                        player_level
-                    );
+            if let Ok(redis_opt) = rx.recv() {
+                match redis_opt {
+                    common::RedisOpt::GamePlayerData(player_id, player_level) => {
+                        log::info!("Redis线程收到数据: {} - {}", player_id, player_level);
+                        if let Ok(_result) = conn.zadd::<&str, u32, &str, usize>(
+                            &match_data_key_name,
+                            &player_id,
+                            player_level,
+                        ) {
+                            log::info!("玩家 {}, level: {} 数据添加成功!", player_id, player_level);
+                            // 数据添加成功
+                        } else {
+                            // Log 数据添加失败
+                            log::info!(
+                                "!!!!!!!! 玩家 {}, level: {} 数据添加失败!",
+                                player_id,
+                                player_level
+                            );
+                        }
+                    }
+                    common::RedisOpt::GameStatus(game_count) => {
+                        if let Ok(()) = conn.set("PoemStarsGameNum", game_count) {}
+                    }
+                    common::RedisOpt::ServerStatus(client_num) => {
+                        if let Ok(()) = conn.set("PoemStarsClientNum", client_num) {}
+                    }
                 }
             }
         }
