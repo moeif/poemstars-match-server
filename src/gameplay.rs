@@ -7,6 +7,7 @@ use crate::robot::{Robot, RobotController};
 use std::collections::HashMap;
 
 const MATCH_POEM_NUM: u32 = 10;
+const POEM_RESULT_WAIT: i64 = 2500; //ms, 比客户端多1s
 
 #[derive(Debug)]
 pub struct Player {
@@ -17,8 +18,9 @@ pub struct Player {
     player_elo_score: u32,
     player_correct_rate: f64,
     game_start_timestamp: i64, // 游戏开始时间戳
-    last_opt_index: i32,       // 最后一次操作的索引
-    opt_bitmap: u32,           // 操作位数据, 0 正确，1 错误
+    next_opt_index: i32,
+    next_opt_timeout_timestamp: i64,
+    opt_bitmap: u32, // 操作位数据, 0 正确，1 错误
     is_dirty: bool,
     robot: Option<Robot>,
     game_score: u32, // 本局游戏得分，根据操作时间来的
@@ -26,79 +28,65 @@ pub struct Player {
 
 impl Player {
     fn is_all_opt_end(&self) -> bool {
-        self.last_opt_index + 1 == MATCH_POEM_NUM as i32
+        self.next_opt_index >= MATCH_POEM_NUM as i32
     }
 
     fn on_opt(
         &mut self,
         opt: proto::CGMatchGameOpt,
         curr_timestamp: i64,
-        server_index: i32,
         poem_mill_time: i64,
         poem_score: u32,
     ) {
-        if opt.opt_index as i32 == server_index {
-            if self.last_opt_index + 1 == opt.opt_index as i32 {
-                self.last_opt_index += 1;
-                self.opt_bitmap |= opt.opt_result << self.last_opt_index;
-                log::info!("On Player {} OPT", self.player_name);
-                if opt.opt_result == 0 {
-                    // 在答对的情况下，计算得分
-                    let server_index_start_timestamp =
-                        self.game_start_timestamp + server_index as i64 * poem_mill_time;
-                    let passed_time = curr_timestamp - server_index_start_timestamp;
-                    let passed_percent: f64 = passed_time as f64 / poem_mill_time as f64;
-                    if passed_percent < 1.0 {
-                        let remaining_percent = 1.0 - passed_percent;
-                        let got_score = (poem_score as f64 * remaining_percent) as u32;
-                        self.game_score += got_score;
-                    }
+        if self.next_opt_index == opt.opt_index as i32 {
+            self.opt_bitmap |= opt.opt_result << self.next_opt_index;
+            log::info!("On Player {} OPT", self.player_name);
+            if opt.opt_result == 0 {
+                // 在答对的情况下，计算得分
+                let remaining_time = self.next_opt_timeout_timestamp - curr_timestamp;
+                if remaining_time < 0 || remaining_time > poem_mill_time {
+                    log::error!("逻辑错误，剩余时间不在合理范围内, {} ", remaining_time);
+                } else {
+                    let remaining_percent = remaining_time as f64 / poem_mill_time as f64;
+                    let got_score = (poem_score as f64 * remaining_percent) as u32;
+                    self.game_score += got_score;
                 }
-            } else {
-                log::error!("OPT failed with index!");
             }
+            self.next_opt_index += 1;
+            self.next_opt_timeout_timestamp = curr_timestamp + poem_mill_time + POEM_RESULT_WAIT;
+            self.is_dirty = true;
+        } else {
+            log::error!("OPT failed with index!");
         }
-        self.is_dirty = true;
     }
 
-    fn update_robot_opt(
-        &mut self,
-        curr_timestamp: i64,
-        server_index: i32,
-        poem_mill_time: i64,
-        poem_score: u32,
-    ) {
-        if self.last_opt_index != server_index {
-            let server_index_start_timestamp =
-                self.game_start_timestamp + server_index as i64 * poem_mill_time;
-            if let Some(ref mut robot) = self.robot {
-                let next_opt_time = server_index_start_timestamp + robot.next_opt_wait_time;
-                if curr_timestamp > next_opt_time {
-                    self.last_opt_index = server_index;
-                    let opt_result = robot.get_opt_result();
-                    self.opt_bitmap |= opt_result << self.last_opt_index;
-                    self.is_dirty = true;
-                    robot.set_next_opt_wait_time(poem_mill_time);
-                    log::info!("ROBOT {} auto OPT!", self.player_name);
-                    if opt_result == 0 {
-                        // 在答对的情况下，计算得分
-                        let passed_time = curr_timestamp - server_index_start_timestamp;
-                        let passed_percent: f64 = passed_time as f64 / poem_mill_time as f64;
-                        if passed_percent < 1.0 {
-                            let remaining_percent = 1.0 - passed_percent;
-                            let got_score = (poem_score as f64 * remaining_percent) as u32;
-                            self.game_score += got_score;
-                        }
-                    }
-                }
+    fn update_robot_opt(&mut self, curr_timestamp: i64, poem_mill_time: i64, poem_score: u32) {
+        if let Some(ref mut robot) = self.robot {
+            let next_opt_time = self.next_opt_timeout_timestamp - robot.next_early_opt_time;
+            if curr_timestamp >= next_opt_time {
+                // 执行机器人操作
+                let opt_result = robot.get_opt_result();
+                self.opt_bitmap |= opt_result << self.next_opt_index;
+                self.is_dirty = true;
+                robot.set_next_opt_wait_time(poem_mill_time);
+                log::info!("ROBOT {} auto OPT!", self.player_name);
+
+                let remaining_percent = robot.next_early_opt_time as f64 / poem_mill_time as f64;
+                let got_score = (poem_score as f64 * remaining_percent) as u32;
+                self.game_score += got_score;
+
+                self.next_opt_index += 1;
+                self.next_opt_timeout_timestamp =
+                    curr_timestamp + poem_mill_time + POEM_RESULT_WAIT;
             }
         }
     }
 
-    fn update_opt_timeout_status(&mut self, server_index: i32) {
-        if server_index - self.last_opt_index > 1 {
-            self.last_opt_index += 1;
-            self.opt_bitmap |= 1 << self.last_opt_index;
+    fn update_opt_timeout_status(&mut self, curr_timestamp: i64, poem_mill_time: i64) {
+        if curr_timestamp > self.next_opt_timeout_timestamp {
+            self.opt_bitmap |= 1 << self.next_opt_index;
+            self.next_opt_index += 1;
+            self.next_opt_timeout_timestamp = curr_timestamp + poem_mill_time + POEM_RESULT_WAIT;
             self.is_dirty = true;
             log::info!("Player {} OPT Timeout, Auto Failed!", self.player_name);
         }
@@ -118,7 +106,6 @@ struct Game {
     player2: Player,
     is_gaming: bool, // 游戏进行中
     is_dirty: bool,
-    curr_index: i32, // 服务器根据时间判断当前处于第几个索引之间
 }
 
 impl Game {
@@ -133,7 +120,6 @@ impl Game {
             player2,
             is_gaming: true,
             is_dirty: false,
-            curr_index: 0,
         }
     }
 
@@ -151,21 +137,11 @@ impl Game {
         poem_score: u32,
     ) {
         if opt.id == self.player1.player_id {
-            self.player1.on_opt(
-                opt,
-                curr_timestamp,
-                self.curr_index,
-                poem_mill_time,
-                poem_score,
-            );
+            self.player1
+                .on_opt(opt, curr_timestamp, poem_mill_time, poem_score);
         } else if opt.id == self.player2.player_id {
-            self.player2.on_opt(
-                opt,
-                curr_timestamp,
-                self.curr_index,
-                poem_mill_time,
-                poem_score,
-            );
+            self.player2
+                .on_opt(opt, curr_timestamp, poem_mill_time, poem_score);
         }
     }
 
@@ -177,24 +153,22 @@ impl Game {
         }
     }
 
-    fn update_server_opt_index(&mut self, curr_timestamp: i64, poem_mill_time: i64) {
-        self.curr_index = ((curr_timestamp - self.start_timestamp) / poem_mill_time) as i32;
-    }
-
     fn is_game_end(&self) -> bool {
         !self.is_gaming
     }
 
     fn update_robot_opt(&mut self, curr_timestamp: i64, poem_mill_time: i64, poem_score: u32) {
         self.player1
-            .update_robot_opt(curr_timestamp, self.curr_index, poem_mill_time, poem_score);
+            .update_robot_opt(curr_timestamp, poem_mill_time, poem_score);
         self.player2
-            .update_robot_opt(curr_timestamp, self.curr_index, poem_mill_time, poem_score);
+            .update_robot_opt(curr_timestamp, poem_mill_time, poem_score);
     }
 
-    fn update_opt_timeout_status(&mut self) {
-        self.player1.update_opt_timeout_status(self.curr_index);
-        self.player2.update_opt_timeout_status(self.curr_index);
+    fn update_opt_timeout_status(&mut self, curr_timestamp: i64, poem_mill_time: i64) {
+        self.player1
+            .update_opt_timeout_status(curr_timestamp, poem_mill_time);
+        self.player2
+            .update_opt_timeout_status(curr_timestamp, poem_mill_time);
     }
 
     fn gc_update_to_json(&self) -> Option<String> {
@@ -202,11 +176,11 @@ impl Game {
             game_id: self.id.clone(),
             player1_id: self.player1.player_id.clone(),
             player1_name: self.player1.player_name.clone(),
-            player1_last_opt_index: self.player1.last_opt_index,
+            player1_next_opt_index: self.player1.next_opt_index,
             player1_opt_bitmap: self.player1.opt_bitmap,
             player2_id: self.player2.player_id.clone(),
             player2_name: self.player2.player_name.clone(),
-            player2_last_opt_index: self.player2.last_opt_index,
+            player2_next_opt_index: self.player2.next_opt_index,
             player2_opt_bitmap: self.player2.opt_bitmap,
         };
 
@@ -300,9 +274,8 @@ impl MatchGameController {
         self.ended_game.clear();
         let mut some_signal_vec: Option<Vec<Signal>> = None;
         for (_, game) in self.game_map.iter_mut() {
-            game.update_server_opt_index(curr_timestamp, self.poem_mill_time);
             game.update_robot_opt(curr_timestamp, self.poem_mill_time, self.poem_score);
-            game.update_opt_timeout_status();
+            game.update_opt_timeout_status(curr_timestamp, self.poem_mill_time);
             game.update_end_status();
 
             if game.is_dirty() {
@@ -393,10 +366,15 @@ impl MatchGameController {
 
     pub fn start_new_game(
         &mut self,
-        player1: Player,
-        player2: Player,
+        mut player1: Player,
+        mut player2: Player,
         curr_timestamp: i64,
     ) -> Option<Signal> {
+        player1.next_opt_index = 0;
+        player1.next_opt_timeout_timestamp = curr_timestamp + self.poem_mill_time + 1;
+        player2.next_opt_index = 0;
+        player2.next_opt_timeout_timestamp = curr_timestamp + self.poem_mill_time + 1;
+
         log::info!("Try Start a new Game!");
         let player_level = player1.player_level;
         if let Some(poem_json_str) = self
@@ -457,7 +435,8 @@ impl MatchGameController {
             player_elo_score: robot.elo_score,
             player_correct_rate: robot.correct_rate,
             game_start_timestamp: curr_timestamp,
-            last_opt_index: -1,
+            next_opt_index: 0,
+            next_opt_timeout_timestamp: -1,
             opt_bitmap: 0,
             is_dirty: false,
             robot: Some(robot),
@@ -477,7 +456,8 @@ pub fn create_player_from_match(match_reqeust: MatchRequest, curr_timestamp: i64
         player_elo_score: match_reqeust.player_elo_score,
         player_correct_rate: match_reqeust.player_correct_rate,
         game_start_timestamp: curr_timestamp,
-        last_opt_index: -1,
+        next_opt_index: 0,
+        next_opt_timeout_timestamp: -1,
         opt_bitmap: 0,
         is_dirty: false,
         robot: None,

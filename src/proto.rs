@@ -65,11 +65,11 @@ pub struct GCUpdateGame {
     pub game_id: String,
     pub player1_id: String,
     pub player1_name: String,
-    pub player1_last_opt_index: i32,
+    pub player1_next_opt_index: i32,
     pub player1_opt_bitmap: u32,
     pub player2_id: String,
     pub player2_name: String,
-    pub player2_last_opt_index: i32,
+    pub player2_next_opt_index: i32,
     pub player2_opt_bitmap: u32,
 }
 

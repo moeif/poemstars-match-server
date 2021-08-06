@@ -78,9 +78,13 @@ fn start_server(
                 NodeEvent::Network(net_event) => match net_event {
                     NetEvent::Connected(_, _) => unreachable!(),
                     NetEvent::Accepted(_endpoint, _listener) => {
-                        log::info!("Client connected: {:?}", _endpoint.resource_id());
                         let endpoint_id = _endpoint.resource_id().to_string();
                         clients.insert(endpoint_id, _endpoint);
+                        log::info!(
+                            "Client connected: {:?}, TotalConnection: {}",
+                            _endpoint.resource_id(),
+                            clients.len()
+                        );
                     }
                     NetEvent::Message(endpoint, data) => {
                         log::info!(
@@ -99,8 +103,12 @@ fn start_server(
                     }
                     NetEvent::Disconnected(_endpoint) => {
                         let endpoint_id = _endpoint.resource_id().to_string();
-                        log::info!("Client disconnected: {:?}", endpoint_id);
                         clients.remove(&endpoint_id);
+                        log::info!(
+                            "Client disconnected: {:?}, TotalConnection: {}",
+                            endpoint_id,
+                            clients.len()
+                        );
                     }
                 },
                 NodeEvent::Signal(signal) => match signal {

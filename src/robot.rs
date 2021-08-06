@@ -11,16 +11,14 @@ pub struct Robot {
     pub level: u32,
     pub elo_score: u32,
     pub correct_rate: f64,
-    pub next_opt_wait_time: i64, // 下一次操作等待时间
+    pub next_early_opt_time: i64,
 }
 
 impl Robot {
     pub fn set_next_opt_wait_time(&mut self, max_time: i64) {
-        let cut_time = max_time / 3;
-        let min_opt_time = max_time - cut_time;
-        let max_opt_time = max_time;
+        let half_time = max_time / 2;
         let mut rng = rand::thread_rng();
-        self.next_opt_wait_time = rng.gen_range(min_opt_time..max_opt_time);
+        self.next_early_opt_time = rng.gen_range(1..=half_time);
     }
 
     pub fn get_opt_result(&self) -> u32 {
@@ -79,8 +77,9 @@ impl RobotController {
             } else {
                 competitor_correct_rate
             },
-            next_opt_wait_time: -1,
+            next_early_opt_time: -1,
         };
+
         robot.set_next_opt_wait_time(max_opt_wait_time);
         return robot;
     }
