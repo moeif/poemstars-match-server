@@ -25,29 +25,29 @@ fn main() {
     let (tx_for_server, rx_for_game_loop) = mpsc::channel();
     let (tx_for_game_loop, rx_for_redis_handler) = mpsc::channel();
     // --------------------------- Debug ------------------------
-    let tx_for_server_clone = tx_for_server.clone();
-    thread::spawn(move || {
-        thread::sleep(std::time::Duration::from_secs(5));
-        let endpoint_id = String::new();
-        let cg_start_match = proto::CGStartMatch {
-            id: "FakePlayerID".to_string(),
-            name: "假玩家".to_string(),
-            level: 3,
-            elo_score: 128,
-            correct_rate: 78.0,
-        };
-        if let Ok(cg_match_json_str) = serde_json::to_string(&cg_start_match) {
-            if let Some(proto_json_str) =
-                proto::ProtoData::new(proto::PROTO_CGSTARTMATCH, cg_match_json_str)
-            {
-                log::info!("发送匹配请求");
-                if let Ok(_) = tx_for_server_clone.send((endpoint_id, proto_json_str)) {
-                } else {
-                    log::error!("发送匹配请求失败");
-                }
-            }
-        }
-    });
+    // let tx_for_server_clone = tx_for_server.clone();
+    // thread::spawn(move || {
+    //     thread::sleep(std::time::Duration::from_secs(5));
+    //     let endpoint_id = String::new();
+    //     let cg_start_match = proto::CGStartMatch {
+    //         id: "FakePlayerID".to_string(),
+    //         name: "假玩家".to_string(),
+    //         level: 3,
+    //         elo_score: 128,
+    //         correct_rate: 78.0,
+    //     };
+    //     if let Ok(cg_match_json_str) = serde_json::to_string(&cg_start_match) {
+    //         if let Some(proto_json_str) =
+    //             proto::ProtoData::new(proto::PROTO_CGSTARTMATCH, cg_match_json_str)
+    //         {
+    //             log::info!("发送匹配请求");
+    //             if let Ok(_) = tx_for_server_clone.send((endpoint_id, proto_json_str)) {
+    //             } else {
+    //                 log::error!("发送匹配请求失败");
+    //             }
+    //         }
+    //     }
+    // });
     // ----------------------------------------------------------
 
     let (handler, listener) = node::split();
@@ -161,7 +161,7 @@ fn start_game_loop(
         config.poem_score,
     );
 
-    let mut last_update_timestamp: i64 = -1;
+    let mut last_update_timestamp: i64 = utils::get_timestamp_millis();
 
     // game server logic loop
     loop {
@@ -265,7 +265,7 @@ fn start_game_loop(
             }
         }
 
-        if last_update_timestamp < 0 || curr_timestamp - last_update_timestamp > 33 {
+        if curr_timestamp - last_update_timestamp >= 33 {
             last_update_timestamp = curr_timestamp;
             if let Some(sync_signal_vec) = match_game_controller.update_games(curr_timestamp) {
                 // 同步游戏
