@@ -1,7 +1,7 @@
 use crate::robottable::RobotTable;
 use rand::Rng;
 
-const MIN_CORRECTION_PERCENT: f64 = 20.0;
+const MIN_CORRECTION_PERCENT: f64 = 35.0;
 const MAX_CORRECTION_PERCENT: f64 = 90.0;
 
 #[derive(Debug)]
@@ -70,7 +70,9 @@ impl RobotController {
             name,
             level: competitor_level,
             elo_score: my_score as u32,
-            correct_rate: if competitor_correct_rate < MIN_CORRECTION_PERCENT {
+            correct_rate: if competitor_correct_rate == 0.0 {
+                MIN_CORRECTION_PERCENT
+            } else if competitor_correct_rate < MIN_CORRECTION_PERCENT {
                 MIN_CORRECTION_PERCENT
             } else if competitor_correct_rate > MAX_CORRECTION_PERCENT {
                 MAX_CORRECTION_PERCENT
