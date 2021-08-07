@@ -1,6 +1,5 @@
 use message_io::network::{NetEvent, Transport};
 use message_io::node::{self, NodeEvent};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
@@ -25,29 +24,29 @@ fn main() {
     let (tx_for_server, rx_for_game_loop) = mpsc::channel();
     let (tx_redis, rx_for_redis_handler) = mpsc::channel();
     // --------------------------- Debug ------------------------
-    let tx_for_server_clone = tx_for_server.clone();
-    thread::spawn(move || {
-        thread::sleep(std::time::Duration::from_secs(5));
-        let endpoint_id = String::new();
-        let cg_start_match = proto::CGStartMatch {
-            id: "FakePlayerID".to_string(),
-            name: "假玩家".to_string(),
-            level: 3,
-            elo_score: 128,
-            correct_rate: 78.0,
-        };
-        if let Ok(cg_match_json_str) = serde_json::to_string(&cg_start_match) {
-            if let Some(proto_json_str) =
-                proto::ProtoData::new(proto::PROTO_CGSTARTMATCH, cg_match_json_str)
-            {
-                log::info!("发送匹配请求");
-                if let Ok(_) = tx_for_server_clone.send((endpoint_id, proto_json_str)) {
-                } else {
-                    log::error!("发送匹配请求失败");
-                }
-            }
-        }
-    });
+    // let tx_for_server_clone = tx_for_server.clone();
+    // thread::spawn(move || {
+    //     thread::sleep(std::time::Duration::from_secs(5));
+    //     let endpoint_id = String::new();
+    //     let cg_start_match = proto::CGStartMatch {
+    //         id: "FakePlayerID".to_string(),
+    //         name: "假玩家".to_string(),
+    //         level: 3,
+    //         elo_score: 128,
+    //         correct_rate: 78.0,
+    //     };
+    //     if let Ok(cg_match_json_str) = serde_json::to_string(&cg_start_match) {
+    //         if let Some(proto_json_str) =
+    //             proto::ProtoData::new(proto::PROTO_CGSTARTMATCH, cg_match_json_str)
+    //         {
+    //             log::info!("发送匹配请求");
+    //             if let Ok(_) = tx_for_server_clone.send((endpoint_id, proto_json_str)) {
+    //             } else {
+    //                 log::error!("发送匹配请求失败");
+    //             }
+    //         }
+    //     }
+    // });
     // ----------------------------------------------------------
 
     let (handler, listener) = node::split();
@@ -187,133 +186,124 @@ fn start_game_loop(
                 endpoint_id,
                 json_str
             );
-            if let Ok(json_values) = serde_json::from_str::<Value>(&json_str) {
-                if let Some(proto_id) = json_values["proto_id"].as_u64() {
-                    if json_values["proto_json_str"].is_object() {
-                        let proto_json_str = &json_values["proto_json_str"].to_string();
-                        match proto_id {
-                            proto::PROTO_CGSTARTMATCH => {
-                                if let Ok(match_info) =
-                                    serde_json::from_str::<proto::CGStartMatch>(proto_json_str)
-                                {
-                                    if !gaming_player_map.contains_key(&match_info.id) {
-                                        let start_match_timestamp = curr_timestamp;
+            if let Some((proto_id, proto_json_str)) =
+                proto::ProtoData::cg_to_proto_json_str(json_str)
+            {
+                match proto_id {
+                    proto::PROTO_CGSTARTMATCH => {
+                        if let Some(match_info) = proto::ProtoData::deserialize_proto::<
+                            proto::CGStartMatch,
+                        >(proto_json_str)
+                        {
+                            if !gaming_player_map.contains_key(&match_info.id) {
+                                let start_match_timestamp = curr_timestamp;
 
-                                        let match_request = gamematch::MatchRequest {
-                                            endpoint_id: if endpoint_id.is_empty() {
-                                                None
-                                            } else {
-                                                Some(endpoint_id.clone())
-                                            },
-                                            player_id: match_info.id.clone(),
-                                            player_name: match_info.name.clone(),
-                                            player_level: match_info.level,
-                                            player_elo_score: match_info.elo_score,
-                                            player_correct_rate: match_info.correct_rate,
-                                            timestamp: curr_timestamp,
-                                        };
-
-                                        gaming_player_map
-                                            .insert(match_info.id, start_match_timestamp);
-                                        match_controller.add_match(match_request);
-                                        // 回复消息，匹配中 CGStartMatch
-                                        if let Some(proto_json_str) =
-                                            proto::GCStartMatch::gc_to_json(0)
-                                        {
-                                            if !endpoint_id.is_empty() {
-                                                log::info!(
-                                                    "Response CGStartMatch -> Client: {}",
-                                                    endpoint_id
-                                                );
-                                                handler.signals().send(common::Signal::Send(
-                                                    endpoint_id,
-                                                    proto_json_str,
-                                                ));
-                                            }
-                                        }
+                                let match_request = gamematch::MatchRequest {
+                                    endpoint_id: if endpoint_id.is_empty() {
+                                        None
                                     } else {
-                                        // 玩家当前已经在匹配或游戏中，暂时不让进了，直接回复匹配失败
-                                        log::warn!(
-                                            "Client {} is in game, match failed!",
-                                            endpoint_id,
-                                        );
-                                        if let Some(proto_json_str) =
-                                            proto::GCStartMatch::gc_to_json(-1)
-                                        {
-                                            log::info!(
-                                                "Response CGStartMatch Failed -> Client: {}",
-                                                endpoint_id
-                                            );
+                                        Some(endpoint_id.clone())
+                                    },
+                                    player_id: match_info.id.clone(),
+                                    player_name: match_info.name.clone(),
+                                    player_level: match_info.level,
+                                    player_elo_score: match_info.elo_score,
+                                    player_correct_rate: match_info.correct_rate,
+                                    timestamp: curr_timestamp,
+                                };
 
-                                            if !endpoint_id.is_empty() {
-                                                handler.signals().send(common::Signal::Send(
-                                                    endpoint_id,
-                                                    proto_json_str,
-                                                ));
-                                            }
-                                        }
+                                gaming_player_map.insert(match_info.id, start_match_timestamp);
+                                match_controller.add_match(match_request);
+                                // 回复消息，匹配中 CGStartMatch
+
+                                if let Some(proto_json_str) = proto::ProtoData::gc_to_json_string(
+                                    proto::PROTO_GCSTARTMATCH,
+                                    proto::GCStartMatch { code: 0 },
+                                ) {
+                                    if !endpoint_id.is_empty() {
+                                        log::info!(
+                                            "Response CGStartMatch -> Client: {}",
+                                            endpoint_id
+                                        );
+                                        handler.signals().send(common::Signal::Send(
+                                            endpoint_id,
+                                            proto_json_str,
+                                        ));
                                     }
-                                } else {
-                                    log::error!("CGStartMatch 反序列化失败!");
                                 }
-                            }
-                            proto::PROTO_CGMATCHGAMEOPT => {
-                                if let Ok(opt_info) =
-                                    serde_json::from_str::<proto::CGMatchGameOpt>(proto_json_str)
-                                {
-                                    match_game_controller.on_opt(opt_info, curr_timestamp);
-                                } else {
-                                    log::error!(
-                                        "ERROR!, Received Game OPT, but deserialize failed: {:?}",
-                                        proto_json_str
+                            } else {
+                                // 玩家当前已经在匹配或游戏中，暂时不让进了，直接回复匹配失败
+                                log::warn!("Client {} is in game, match failed!", endpoint_id,);
+                                if let Some(proto_json_str) = proto::ProtoData::gc_to_json_string(
+                                    proto::PROTO_GCSTARTMATCH,
+                                    proto::GCStartMatch { code: -1 },
+                                ) {
+                                    log::info!(
+                                        "Response CGStartMatch Failed -> Client: {}",
+                                        endpoint_id
                                     );
+
+                                    if !endpoint_id.is_empty() {
+                                        handler.signals().send(common::Signal::Send(
+                                            endpoint_id,
+                                            proto_json_str,
+                                        ));
+                                    }
                                 }
                             }
-                            _ => {}
                         }
                     }
-                } else {
-                    log::error!("JsonValue中找不到 proto_id 字段!");
+                    proto::PROTO_CGMATCHGAMEOPT => {
+                        if let Some(opt_info) = proto::ProtoData::deserialize_proto::<
+                            proto::CGMatchGameOpt,
+                        >(proto_json_str)
+                        {
+                            match_game_controller.on_opt(opt_info, curr_timestamp);
+                        } else {
+                            log::error!("ERROR!, Received Game OPT, but deserialize failed");
+                        }
+                    }
+                    _ => {}
                 }
             } else {
                 log::error!("反序列化 ProtoData->Value 失败");
             }
-        }
 
-        if curr_timestamp - last_update_timestamp >= 33 {
-            last_update_timestamp = curr_timestamp;
-            if let Some(sync_signal_vec) = match_game_controller.update_games(curr_timestamp) {
-                // 同步游戏
-                for signal in sync_signal_vec {
-                    handler.signals().send(signal);
-                }
-            }
-
-            if let Some((some_match_request1, some_match_request2)) =
-                match_controller.update_matches(curr_timestamp)
-            {
-                if let Some(match_request1) = some_match_request1 {
-                    let game_player1 =
-                        gameplay::create_player_from_match(match_request1, curr_timestamp);
-                    let game_player2 = if let Some(match_request2) = some_match_request2 {
-                        gameplay::create_player_from_match(match_request2, curr_timestamp)
-                    } else {
-                        match_game_controller.create_robot_player(
-                            &game_player1,
-                            curr_timestamp,
-                            config.poem_mill_time,
-                        )
-                    };
-
-                    if let Some(start_game_signal) = match_game_controller.start_new_game(
-                        game_player1,
-                        game_player2,
-                        curr_timestamp,
-                    ) {
-                        handler.signals().send(start_game_signal);
+            if curr_timestamp - last_update_timestamp >= 33 {
+                last_update_timestamp = curr_timestamp;
+                if let Some(sync_signal_vec) = match_game_controller.update_games(curr_timestamp) {
+                    // 同步游戏
+                    for signal in sync_signal_vec {
+                        handler.signals().send(signal);
                     }
-                } else {
-                    log::error!("逻辑错误，匹配返回Some时第一个玩家不可能为None");
+                }
+
+                if let Some((some_match_request1, some_match_request2)) =
+                    match_controller.update_matches(curr_timestamp)
+                {
+                    if let Some(match_request1) = some_match_request1 {
+                        let game_player1 =
+                            gameplay::create_player_from_match(match_request1, curr_timestamp);
+                        let game_player2 = if let Some(match_request2) = some_match_request2 {
+                            gameplay::create_player_from_match(match_request2, curr_timestamp)
+                        } else {
+                            match_game_controller.create_robot_player(
+                                &game_player1,
+                                curr_timestamp,
+                                config.poem_mill_time,
+                            )
+                        };
+
+                        if let Some(start_game_signal) = match_game_controller.start_new_game(
+                            game_player1,
+                            game_player2,
+                            curr_timestamp,
+                        ) {
+                            handler.signals().send(start_game_signal);
+                        }
+                    } else {
+                        log::error!("逻辑错误，匹配返回Some时第一个玩家不可能为None");
+                    }
                 }
             }
         }

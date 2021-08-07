@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use std::str;
 
 pub const PROTO_CGSTARTMATCH: u64 = 1001;
 pub const PROTO_GCSTARTMATCH: u64 = 2001;
@@ -7,6 +7,10 @@ pub const PROTO_CGMATCHGAMEOPT: u64 = 1002;
 pub const PROTO_GCSTARTGAME: u64 = 2002;
 pub const PROTO_GCUPDATEGAME: u64 = 2003;
 pub const PROTO_GCENDGAME: u64 = 2004;
+
+pub trait GCProtoBase64 {
+    fn to_base64_json_str(&self) -> Option<String>;
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CGStartMatch {
@@ -22,20 +26,19 @@ pub struct GCStartMatch {
     pub code: i32,
 }
 
-impl GCStartMatch {
-    pub fn gc_to_json(code: i32) -> Option<String> {
-        let proto = GCStartMatch { code };
-
-        if let Ok(json_str) = serde_json::to_string(&proto) {
-            return ProtoData::new(PROTO_GCSTARTMATCH, json_str);
+impl GCProtoBase64 for GCStartMatch {
+    fn to_base64_json_str(&self) -> Option<String> {
+        if let Ok(json_str) = serde_json::to_string(self) {
+            let base64_json_str = base64::encode(json_str);
+            return Some(base64_json_str);
         }
-
         return None;
     }
 }
 
 #[derive(Serialize)]
 pub struct GCStartGame {
+    pub game_id: String,
     pub player1_id: String,
     pub player1_name: String,
     pub player2_id: String,
@@ -43,10 +46,11 @@ pub struct GCStartGame {
     pub poem_data_str: String,
 }
 
-impl GCStartGame {
-    pub fn gc_to_json(&self) -> Option<String> {
+impl GCProtoBase64 for GCStartGame {
+    fn to_base64_json_str(&self) -> Option<String> {
         if let Ok(json_str) = serde_json::to_string(self) {
-            return ProtoData::new(PROTO_GCSTARTGAME, json_str);
+            let base64_json_str = base64::encode(json_str);
+            return Some(base64_json_str);
         }
         return None;
     }
@@ -73,10 +77,11 @@ pub struct GCUpdateGame {
     pub player2_opt_bitmap: u32,
 }
 
-impl GCUpdateGame {
-    pub fn gc_to_json(&self) -> Option<String> {
+impl GCProtoBase64 for GCUpdateGame {
+    fn to_base64_json_str(&self) -> Option<String> {
         if let Ok(json_str) = serde_json::to_string(self) {
-            return ProtoData::new(PROTO_GCUPDATEGAME, json_str);
+            let base64_json_str = base64::encode(json_str);
+            return Some(base64_json_str);
         }
         return None;
     }
@@ -99,10 +104,11 @@ pub struct GCEndGame {
     pub player2_new_level: u32,
 }
 
-impl GCEndGame {
-    pub fn gc_to_json(&self) -> Option<String> {
+impl GCProtoBase64 for GCEndGame {
+    fn to_base64_json_str(&self) -> Option<String> {
         if let Ok(json_str) = serde_json::to_string(self) {
-            return ProtoData::new(PROTO_GCENDGAME, json_str);
+            let base64_json_str = base64::encode(json_str);
+            return Some(base64_json_str);
         }
         return None;
     }
@@ -111,15 +117,15 @@ impl GCEndGame {
 #[derive(Serialize, Deserialize)]
 pub struct ProtoData {
     pub proto_id: u64,
-    pub proto_json_str: Value,
+    pub proto_json_str: String,
 }
 
 impl ProtoData {
-    pub fn new(proto_id: u64, json_str: String) -> Option<String> {
-        if let Ok(json_value) = serde_json::from_str::<Value>(&json_str) {
+    pub fn gc_to_json_string(proto_id: u64, proto: impl GCProtoBase64) -> Option<String> {
+        if let Some(proto_json_str) = proto.to_base64_json_str() {
             let proto_data = Self {
                 proto_id: proto_id,
-                proto_json_str: json_value,
+                proto_json_str: proto_json_str,
             };
 
             if let Ok(proto_json_str) = serde_json::to_string(&proto_data) {
@@ -127,6 +133,29 @@ impl ProtoData {
             }
         }
 
+        return None;
+    }
+
+    // 收到客户端发来的数据，解析出 protoId和具体协议的 base64_json_str
+    pub fn cg_to_proto_json_str(json_str: String) -> Option<(u64, String)> {
+        if let Ok(proto_data) = serde_json::from_str::<ProtoData>(&json_str) {
+            return Some((proto_data.proto_id, proto_data.proto_json_str));
+        }
+        return None;
+    }
+
+    // 将 Base64 json str 转成具体的协议
+    pub fn deserialize_proto<'a, T>(base64_json_str: String) -> Option<T>
+    where
+        T: Deserialize<'a>,
+    {
+        if let Ok(bytes) = base64::decode(base64_json_str) {
+            if let Ok(raw_json_str) = str::from_utf8(&bytes) {
+                if let Ok(proto) = serde_json::from_str::<T>(raw_json_str) {
+                    return Some(proto);
+                }
+            }
+        }
         return None;
     }
 }

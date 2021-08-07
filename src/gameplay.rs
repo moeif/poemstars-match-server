@@ -184,7 +184,7 @@ impl Game {
             player2_opt_bitmap: self.player2.opt_bitmap,
         };
 
-        return gc_update_game.gc_to_json();
+        return proto::ProtoData::gc_to_json_string(proto::PROTO_GCUPDATEGAME, gc_update_game);
     }
 
     fn gc_end_game_to_json(&mut self, petable: &PETable) -> Option<String> {
@@ -226,7 +226,7 @@ impl Game {
             player2_new_level: self.player2.player_level,
         };
 
-        return gc_end_game.gc_to_json();
+        return proto::ProtoData::gc_to_json_string(proto::PROTO_GCENDGAME, gc_end_game);
     }
 }
 
@@ -389,7 +389,15 @@ impl MatchGameController {
             let player2_id = player2.player_id.clone();
             let player2_name = player2.player_name.clone();
 
+            let game_id = format!(
+                "{}_{}_{}",
+                player1.player_id.clone(),
+                player2.player_id.clone(),
+                curr_timestamp
+            );
+
             let gc_start_game = proto::GCStartGame {
+                game_id: game_id,
                 player1_id: player1_id,
                 player1_name: player1_name,
                 player2_id: player2_id,
@@ -398,7 +406,9 @@ impl MatchGameController {
             };
 
             // 创建消息同步 Signal
-            if let Some(gc_start_game_json_str) = gc_start_game.gc_to_json() {
+            if let Some(gc_start_game_json_str) =
+                proto::ProtoData::gc_to_json_string(proto::PROTO_GCSTARTGAME, gc_start_game)
+            {
                 let signal = Signal::Sync(
                     player1.endpoint_id.clone(),
                     player2.endpoint_id.clone(),
