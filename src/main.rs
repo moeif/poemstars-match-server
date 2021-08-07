@@ -16,6 +16,7 @@ mod utils;
 extern crate redis;
 use redis::Commands;
 extern crate log4rs;
+use rand::Rng;
 
 fn main() {
     log4rs::init_file("log4rs.yml", Default::default()).unwrap();
@@ -23,31 +24,6 @@ fn main() {
 
     let (tx_for_server, rx_for_game_loop) = mpsc::channel();
     let (tx_redis, rx_for_redis_handler) = mpsc::channel();
-    // --------------------------- Debug ------------------------
-    // let tx_for_server_clone = tx_for_server.clone();
-    // thread::spawn(move || {
-    //     thread::sleep(std::time::Duration::from_secs(5));
-    //     let endpoint_id = String::new();
-    //     let cg_start_match = proto::CGStartMatch {
-    //         id: "FakePlayerID".to_string(),
-    //         name: "假玩家".to_string(),
-    //         level: 3,
-    //         elo_score: 128,
-    //         correct_rate: 78.0,
-    //     };
-    //     if let Ok(cg_match_json_str) = serde_json::to_string(&cg_start_match) {
-    //         if let Some(proto_json_str) =
-    //             proto::ProtoData::new(proto::PROTO_CGSTARTMATCH, cg_match_json_str)
-    //         {
-    //             log::info!("发送匹配请求");
-    //             if let Ok(_) = tx_for_server_clone.send((endpoint_id, proto_json_str)) {
-    //             } else {
-    //                 log::error!("发送匹配请求失败");
-    //             }
-    //         }
-    //     }
-    // });
-    // ----------------------------------------------------------
 
     let (handler, listener) = node::split();
     start_redis_handler(
@@ -57,11 +33,48 @@ fn main() {
     start_server(
         handler.clone(),
         listener,
-        tx_for_server,
+        tx_for_server.clone(),
         tx_redis.clone(),
         server_config.port,
     );
-    start_game_loop(handler, tx_redis.clone(), rx_for_game_loop, &server_config);
+
+    let task = thread::spawn(move || {
+        start_game_loop(handler, tx_redis.clone(), rx_for_game_loop, &server_config);
+    });
+
+    // --------------------------- Debug ------------------------
+    // let mut rng = rand::thread_rng();
+    // for i in 0..5000 {
+    //     let level = rng.gen_range(3..70);
+    //     let elo_score = level * 10;
+    //     let correct_rate = rng.gen_range(30.0..90.0);
+    //     let wait_time = rng.gen_range(5..10);
+    //     let tx_for_server_clone = tx_for_server.clone();
+    //     println!("Fake Player: {}", i);
+    //     thread::spawn(move || {
+    //         thread::sleep(std::time::Duration::from_secs(wait_time));
+    //         let endpoint_id = String::new();
+    //         let cg_start_match = proto::CGStartMatch {
+    //             id: format!("FakePlayerID_{}", i),
+    //             name: format!("假玩家_{}", i),
+    //             level: level,
+    //             elo_score: elo_score,
+    //             correct_rate: correct_rate,
+    //         };
+    //         if let Some(json_str) =
+    //             proto::ProtoData::gc_to_json_string(proto::PROTO_CGSTARTMATCH, cg_start_match)
+    //         {
+    //             log::info!("发送匹配请求");
+    //             if let Ok(_) = tx_for_server_clone.send((endpoint_id, json_str)) {
+    //             } else {
+    //                 log::error!("发送匹配请求失败");
+    //             }
+    //         }
+    //     });
+    // }
+    // ----------------------------------------------------------
+
+    task.join().unwrap();
 }
 
 fn start_server(
@@ -98,7 +111,7 @@ fn start_server(
                     }
                     NetEvent::Message(endpoint, data) => {
                         log::info!(
-                            "Server Received: {:?}, data: {:?}",
+                            ">>>>>>>>> Server Received: {:?}, data: {:?}",
                             endpoint.resource_id(),
                             String::from_utf8_lossy(data)
                         );
@@ -109,6 +122,8 @@ fn start_server(
                             } else {
                                 log::error!("channel send error!");
                             }
+                        } else {
+                            log::error!("ERROR!, Received Binary data -> json str failed!");
                         }
                     }
                     NetEvent::Disconnected(_endpoint) => {
@@ -127,7 +142,7 @@ fn start_server(
                 },
                 NodeEvent::Signal(signal) => match signal {
                     common::Signal::Send(endpoint_id, json_str) => {
-                        log::info!("Send Msg to client: {} - {}", endpoint_id, json_str);
+                        log::info!("Send Msg to client: {} --------\n", endpoint_id);
                         if let Some(client_endpoint) = clients.get(&endpoint_id) {
                             let data = json_str.as_bytes();
                             server_handler.network().send(*client_endpoint, data);
@@ -135,10 +150,9 @@ fn start_server(
                     }
                     common::Signal::Sync(endpoint_id1, endpoint_id2, json_str) => {
                         log::info!(
-                            "Sync to client: {:?} - {:?} - {}",
+                            "Sync to client: {:?} - {:?} --------\n",
                             endpoint_id1,
-                            endpoint_id2,
-                            json_str
+                            endpoint_id2
                         );
                         let data = json_str.as_bytes();
                         if let Some(endpoint_id1) = endpoint_id1 {
@@ -176,21 +190,22 @@ fn start_game_loop(
     );
 
     let mut last_update_timestamp: i64 = utils::get_timestamp_millis();
+    let mut sum_frame = 0;
+    let mut sum_time = 0;
+    let sample_time = 500;
+    let mut fps = 0.0;
 
     // game server logic loop
     loop {
         let curr_timestamp = utils::get_timestamp_millis();
         if let Ok((endpoint_id, json_str)) = rx_from_server.try_recv() {
-            log::info!(
-                "Received Channel Info From Server: {} - {}",
-                endpoint_id,
-                json_str
-            );
+            log::info!("Received Channel Info From Server: {}", endpoint_id);
             if let Some((proto_id, proto_json_str)) =
                 proto::ProtoData::cg_to_proto_json_str(json_str)
             {
                 match proto_id {
                     proto::PROTO_CGSTARTMATCH => {
+                        log::info!("Handle Client Proto CGStartMatch");
                         if let Some(match_info) = proto::ProtoData::deserialize_proto::<
                             proto::CGStartMatch,
                         >(proto_json_str)
@@ -254,6 +269,7 @@ fn start_game_loop(
                         }
                     }
                     proto::PROTO_CGMATCHGAMEOPT => {
+                        log::info!("Handle Client Proto OPT");
                         if let Some(opt_info) = proto::ProtoData::deserialize_proto::<
                             proto::CGMatchGameOpt,
                         >(proto_json_str)
@@ -268,42 +284,58 @@ fn start_game_loop(
             } else {
                 log::error!("反序列化 ProtoData->Value 失败");
             }
+        }
 
-            if curr_timestamp - last_update_timestamp >= 33 {
-                last_update_timestamp = curr_timestamp;
-                if let Some(sync_signal_vec) = match_game_controller.update_games(curr_timestamp) {
-                    // 同步游戏
-                    for signal in sync_signal_vec {
-                        handler.signals().send(signal);
-                    }
+        if curr_timestamp - last_update_timestamp >= 33 {
+            sum_frame += 1;
+            sum_time += curr_timestamp - last_update_timestamp;
+            // println!("sum_frame: {}, sum_time: {}", sum_frame, sum_time);
+            if sum_time > sample_time {
+                fps = sum_frame as f64 / (sum_time as f64 / 1000.0);
+                sum_frame = 0;
+                sum_time = 0;
+            }
+
+            // println!(
+            //     "{}  -  GameCount: {}  FPS: {:.2}",
+            //     curr_timestamp,
+            //     match_game_controller.game_count(),
+            //     fps
+            // );
+
+            last_update_timestamp = curr_timestamp;
+            if let Some(sync_signal_vec) = match_game_controller.update_games(curr_timestamp) {
+                // 同步游戏
+                for signal in sync_signal_vec {
+                    handler.signals().send(signal);
                 }
+            }
 
-                if let Some((some_match_request1, some_match_request2)) =
-                    match_controller.update_matches(curr_timestamp)
-                {
-                    if let Some(match_request1) = some_match_request1 {
-                        let game_player1 =
-                            gameplay::create_player_from_match(match_request1, curr_timestamp);
-                        let game_player2 = if let Some(match_request2) = some_match_request2 {
-                            gameplay::create_player_from_match(match_request2, curr_timestamp)
-                        } else {
-                            match_game_controller.create_robot_player(
-                                &game_player1,
-                                curr_timestamp,
-                                config.poem_mill_time,
-                            )
-                        };
-
-                        if let Some(start_game_signal) = match_game_controller.start_new_game(
-                            game_player1,
-                            game_player2,
-                            curr_timestamp,
-                        ) {
-                            handler.signals().send(start_game_signal);
-                        }
+            if let Some((some_match_request1, some_match_request2)) =
+                match_controller.update_matches(curr_timestamp)
+            {
+                if let Some(match_request1) = some_match_request1 {
+                    let game_player1 =
+                        gameplay::create_player_from_match(match_request1, curr_timestamp);
+                    let game_player2 = if let Some(match_request2) = some_match_request2 {
+                        gameplay::create_player_from_match(match_request2, curr_timestamp)
                     } else {
-                        log::error!("逻辑错误，匹配返回Some时第一个玩家不可能为None");
+                        match_game_controller.create_robot_player(
+                            &game_player1,
+                            curr_timestamp,
+                            config.poem_mill_time,
+                        )
+                    };
+
+                    if let Some(start_game_signal) = match_game_controller.start_new_game(
+                        game_player1,
+                        game_player2,
+                        curr_timestamp,
+                    ) {
+                        handler.signals().send(start_game_signal);
                     }
+                } else {
+                    log::error!("逻辑错误，匹配返回Some时第一个玩家不可能为None");
                 }
             }
         }

@@ -21,6 +21,18 @@ pub struct CGStartMatch {
     pub correct_rate: f64, // 正确率
 }
 
+// Debug Code
+impl GCProtoBase64 for CGStartMatch {
+    fn to_base64_json_str(&self) -> Option<String> {
+        if let Ok(json_str) = serde_json::to_string(self) {
+            log::info!("CGStartMatch: {:?}", json_str);
+            let base64_json_str = base64::encode(json_str);
+            return Some(base64_json_str);
+        }
+        return None;
+    }
+}
+
 #[derive(Serialize)]
 pub struct GCStartMatch {
     pub code: i32,
@@ -29,6 +41,7 @@ pub struct GCStartMatch {
 impl GCProtoBase64 for GCStartMatch {
     fn to_base64_json_str(&self) -> Option<String> {
         if let Ok(json_str) = serde_json::to_string(self) {
+            log::info!("GCStartMatch: {:?}", json_str);
             let base64_json_str = base64::encode(json_str);
             return Some(base64_json_str);
         }
@@ -49,6 +62,7 @@ pub struct GCStartGame {
 impl GCProtoBase64 for GCStartGame {
     fn to_base64_json_str(&self) -> Option<String> {
         if let Ok(json_str) = serde_json::to_string(self) {
+            log::info!("GCStartGame: {:?}", json_str);
             let base64_json_str = base64::encode(json_str);
             return Some(base64_json_str);
         }
@@ -80,6 +94,7 @@ pub struct GCUpdateGame {
 impl GCProtoBase64 for GCUpdateGame {
     fn to_base64_json_str(&self) -> Option<String> {
         if let Ok(json_str) = serde_json::to_string(self) {
+            log::info!("GCUpdateGame: {:?}", json_str);
             let base64_json_str = base64::encode(json_str);
             return Some(base64_json_str);
         }
@@ -107,6 +122,7 @@ pub struct GCEndGame {
 impl GCProtoBase64 for GCEndGame {
     fn to_base64_json_str(&self) -> Option<String> {
         if let Ok(json_str) = serde_json::to_string(self) {
+            log::info!("GCEndGame: {:?}", json_str);
             let base64_json_str = base64::encode(json_str);
             return Some(base64_json_str);
         }
@@ -145,14 +161,17 @@ impl ProtoData {
     }
 
     // 将 Base64 json str 转成具体的协议
-    pub fn deserialize_proto<'a, T>(base64_json_str: String) -> Option<T>
+    pub fn deserialize_proto<T>(base64_json_str: String) -> Option<T>
     where
-        T: Deserialize<'a>,
+        T: serde::de::DeserializeOwned,
     {
         if let Ok(bytes) = base64::decode(base64_json_str) {
             if let Ok(raw_json_str) = str::from_utf8(&bytes) {
+                log::info!("Client -> Server JsonStr: {:?}", raw_json_str);
                 if let Ok(proto) = serde_json::from_str::<T>(raw_json_str) {
                     return Some(proto);
+                } else {
+                    log::info!("Error!, Deserialize json to CG proto failed!");
                 }
             }
         }

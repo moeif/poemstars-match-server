@@ -281,7 +281,7 @@ impl MatchGameController {
             if game.is_dirty() {
                 log::info!("Game {} data is dirty!", game.id);
                 if let Some(proto_json_str) = game.gc_update_to_json() {
-                    log::info!("Sync game {} data -> Client!", game.id);
+                    log::info!("Sync GCUpdateGame {} data -> Client!", game.id);
                     let signal = Signal::Sync(
                         game.player1.endpoint_id.clone(),
                         game.player2.endpoint_id.clone(),
@@ -303,7 +303,7 @@ impl MatchGameController {
                 self.ended_game.push(game.id.clone());
 
                 if let Some(proto_json_str) = game.gc_end_game_to_json(&self.petable) {
-                    log::info!("Sync game {} END data -> Client!", game.id);
+                    log::info!("Sync GCEndGame {} END data -> Client!", game.id);
                     let signal = Signal::Sync(
                         game.player1.endpoint_id.clone(),
                         game.player2.endpoint_id.clone(),
@@ -461,6 +461,10 @@ impl MatchGameController {
         };
         log::info!("ROBOT player created: {:?}", player);
         return player;
+    }
+
+    pub fn game_count(&self) -> usize {
+        self.game_map.len()
     }
 }
 

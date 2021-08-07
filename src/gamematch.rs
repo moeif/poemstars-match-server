@@ -69,7 +69,7 @@ impl MatchController {
                 let mut use_robot = false;
                 let mut matched = false;
 
-                log::info!("waited_time: {}", waited_time);
+                // log::info!("waited_time: {}", waited_time);
 
                 // 找到一个潜在的对手后，根据当前玩家等待的时间判断，对手是否满足要求
                 if min_index > 0 {
