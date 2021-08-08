@@ -1,3 +1,4 @@
+use crate::poemtable::PoemLineRecord;
 use serde::{Deserialize, Serialize};
 use std::str;
 
@@ -56,7 +57,7 @@ pub struct GCStartGame {
     pub player1_name: String,
     pub player2_id: String,
     pub player2_name: String,
-    pub poem_data_str: String,
+    pub poem_data: Vec<PoemLineRecord>,
 }
 
 impl GCProtoBase64 for GCStartGame {

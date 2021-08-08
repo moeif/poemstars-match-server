@@ -210,62 +210,58 @@ fn start_game_loop(
                             proto::CGStartMatch,
                         >(proto_json_str)
                         {
-                            if !gaming_player_map.contains_key(&match_info.id) {
-                                let start_match_timestamp = curr_timestamp;
+                            // if !gaming_player_map.contains_key(&match_info.id) {
+                            let start_match_timestamp = curr_timestamp;
 
-                                let match_request = gamematch::MatchRequest {
-                                    endpoint_id: if endpoint_id.is_empty() {
-                                        None
-                                    } else {
-                                        Some(endpoint_id.clone())
-                                    },
-                                    player_id: match_info.id.clone(),
-                                    player_name: match_info.name.clone(),
-                                    player_level: match_info.level,
-                                    player_elo_score: match_info.elo_score,
-                                    player_correct_rate: match_info.correct_rate,
-                                    timestamp: curr_timestamp,
-                                };
+                            let match_request = gamematch::MatchRequest {
+                                endpoint_id: if endpoint_id.is_empty() {
+                                    None
+                                } else {
+                                    Some(endpoint_id.clone())
+                                },
+                                player_id: match_info.id.clone(),
+                                player_name: match_info.name.clone(),
+                                player_level: match_info.level,
+                                player_elo_score: match_info.elo_score,
+                                player_correct_rate: match_info.correct_rate,
+                                timestamp: curr_timestamp,
+                            };
 
-                                gaming_player_map.insert(match_info.id, start_match_timestamp);
-                                match_controller.add_match(match_request);
-                                // 回复消息，匹配中 CGStartMatch
+                            gaming_player_map.insert(match_info.id, start_match_timestamp);
+                            match_controller.add_match(match_request);
+                            // 回复消息，匹配中 CGStartMatch
 
-                                if let Some(proto_json_str) = proto::ProtoData::gc_to_json_string(
-                                    proto::PROTO_GCSTARTMATCH,
-                                    proto::GCStartMatch { code: 0 },
-                                ) {
-                                    if !endpoint_id.is_empty() {
-                                        log::info!(
-                                            "Response CGStartMatch -> Client: {}",
-                                            endpoint_id
-                                        );
-                                        handler.signals().send(common::Signal::Send(
-                                            endpoint_id,
-                                            proto_json_str,
-                                        ));
-                                    }
-                                }
-                            } else {
-                                // 玩家当前已经在匹配或游戏中，暂时不让进了，直接回复匹配失败
-                                log::warn!("Client {} is in game, match failed!", endpoint_id,);
-                                if let Some(proto_json_str) = proto::ProtoData::gc_to_json_string(
-                                    proto::PROTO_GCSTARTMATCH,
-                                    proto::GCStartMatch { code: -1 },
-                                ) {
-                                    log::info!(
-                                        "Response CGStartMatch Failed -> Client: {}",
-                                        endpoint_id
-                                    );
-
-                                    if !endpoint_id.is_empty() {
-                                        handler.signals().send(common::Signal::Send(
-                                            endpoint_id,
-                                            proto_json_str,
-                                        ));
-                                    }
+                            if let Some(proto_json_str) = proto::ProtoData::gc_to_json_string(
+                                proto::PROTO_GCSTARTMATCH,
+                                proto::GCStartMatch { code: 0 },
+                            ) {
+                                if !endpoint_id.is_empty() {
+                                    log::info!("Response CGStartMatch -> Client: {}", endpoint_id);
+                                    handler
+                                        .signals()
+                                        .send(common::Signal::Send(endpoint_id, proto_json_str));
                                 }
                             }
+                            // } else {
+                            //     // 玩家当前已经在匹配或游戏中，暂时不让进了，直接回复匹配失败
+                            //     log::warn!("Client {} is in game, match failed!", endpoint_id,);
+                            //     if let Some(proto_json_str) = proto::ProtoData::gc_to_json_string(
+                            //         proto::PROTO_GCSTARTMATCH,
+                            //         proto::GCStartMatch { code: -1 },
+                            //     ) {
+                            //         log::info!(
+                            //             "Response CGStartMatch Failed -> Client: {}",
+                            //             endpoint_id
+                            //         );
+
+                            //         if !endpoint_id.is_empty() {
+                            //             handler.signals().send(common::Signal::Send(
+                            //                 endpoint_id,
+                            //                 proto_json_str,
+                            //             ));
+                            //         }
+                            //     }
+                            // }
                         }
                     }
                     proto::PROTO_CGMATCHGAMEOPT => {

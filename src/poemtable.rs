@@ -101,7 +101,8 @@ impl PoemTable {
         }
     }
 
-    pub fn get_random_game_data(&mut self, level: u32, count: u32) -> Option<String> {
+    pub fn get_random_game_data(&mut self, level: u32, count: u32) -> Option<Vec<PoemLineRecord>> {
+        //Option<String> {
         let key = match level {
             0..=10 => 1,
             11..=20 => 11,
@@ -130,8 +131,12 @@ impl PoemTable {
                 }
             }
 
-            if let Ok(json_str) = serde_json::to_string(&selected_poem_record) {
-                return Some(json_str);
+            // if let Ok(json_str) = serde_json::to_string(&selected_poem_record) {
+            //     return Some(json_str);
+            // }
+
+            if selected_poem_record.len() > 0 {
+                return Some(selected_poem_record);
             }
         } else {
             println!("逻辑错误");

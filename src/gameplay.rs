@@ -38,57 +38,66 @@ impl Player {
         poem_mill_time: i64,
         poem_score: u32,
     ) {
-        if self.next_opt_index == opt.opt_index as i32 {
-            self.opt_bitmap |= opt.opt_result << self.next_opt_index;
-            log::info!("On Player {} OPT", self.player_name);
-            if opt.opt_result == 0 {
-                // 在答对的情况下，计算得分
-                let remaining_time = self.next_opt_timeout_timestamp - curr_timestamp;
-                if remaining_time < 0 || remaining_time > poem_mill_time {
-                    log::error!("逻辑错误，剩余时间不在合理范围内, {} ", remaining_time);
-                } else {
-                    let remaining_percent = remaining_time as f64 / poem_mill_time as f64;
-                    let got_score = (poem_score as f64 * remaining_percent) as u32;
-                    self.game_score += got_score;
+        if self.next_opt_index < MATCH_POEM_NUM as i32 {
+            if self.next_opt_index == opt.opt_index as i32 {
+                self.opt_bitmap |= opt.opt_result << self.next_opt_index;
+                log::info!("On Player {} OPT", self.player_name);
+                if opt.opt_result == 0 {
+                    // 在答对的情况下，计算得分
+                    let remaining_time = self.next_opt_timeout_timestamp - curr_timestamp;
+                    if remaining_time < 0 || remaining_time > poem_mill_time {
+                        log::error!("逻辑错误，剩余时间不在合理范围内, {} ", remaining_time);
+                    } else {
+                        let remaining_percent = remaining_time as f64 / poem_mill_time as f64;
+                        let got_score = (poem_score as f64 * remaining_percent) as u32;
+                        self.game_score += got_score;
+                    }
                 }
+                self.next_opt_index += 1;
+                self.next_opt_timeout_timestamp =
+                    curr_timestamp + poem_mill_time + POEM_RESULT_WAIT;
+                self.is_dirty = true;
+            } else {
+                log::error!("OPT failed with index!");
             }
-            self.next_opt_index += 1;
-            self.next_opt_timeout_timestamp = curr_timestamp + poem_mill_time + POEM_RESULT_WAIT;
-            self.is_dirty = true;
-        } else {
-            log::error!("OPT failed with index!");
         }
     }
 
     fn update_robot_opt(&mut self, curr_timestamp: i64, poem_mill_time: i64, poem_score: u32) {
-        if let Some(ref mut robot) = self.robot {
-            let next_opt_time = self.next_opt_timeout_timestamp - robot.next_early_opt_time;
-            if curr_timestamp >= next_opt_time {
-                // 执行机器人操作
-                let opt_result = robot.get_opt_result();
-                self.opt_bitmap |= opt_result << self.next_opt_index;
-                self.is_dirty = true;
-                robot.set_next_opt_wait_time(poem_mill_time);
-                log::info!("ROBOT {} auto OPT!", self.player_name);
+        if self.next_opt_index < MATCH_POEM_NUM as i32 {
+            if let Some(ref mut robot) = self.robot {
+                let next_opt_time = self.next_opt_timeout_timestamp - robot.next_early_opt_time;
+                if curr_timestamp >= next_opt_time {
+                    // 执行机器人操作
+                    let opt_result = robot.get_opt_result();
+                    self.opt_bitmap |= opt_result << self.next_opt_index;
+                    self.is_dirty = true;
+                    robot.set_next_opt_wait_time(poem_mill_time);
+                    log::info!("ROBOT {} auto OPT!", self.player_name);
 
-                let remaining_percent = robot.next_early_opt_time as f64 / poem_mill_time as f64;
-                let got_score = (poem_score as f64 * remaining_percent) as u32;
-                self.game_score += got_score;
+                    let remaining_percent =
+                        robot.next_early_opt_time as f64 / poem_mill_time as f64;
+                    let got_score = (poem_score as f64 * remaining_percent) as u32;
+                    self.game_score += got_score;
 
-                self.next_opt_index += 1;
-                self.next_opt_timeout_timestamp =
-                    curr_timestamp + poem_mill_time + POEM_RESULT_WAIT;
+                    self.next_opt_index += 1;
+                    self.next_opt_timeout_timestamp =
+                        curr_timestamp + poem_mill_time + POEM_RESULT_WAIT;
+                }
             }
         }
     }
 
     fn update_opt_timeout_status(&mut self, curr_timestamp: i64, poem_mill_time: i64) {
-        if curr_timestamp > self.next_opt_timeout_timestamp {
-            self.opt_bitmap |= 1 << self.next_opt_index;
-            self.next_opt_index += 1;
-            self.next_opt_timeout_timestamp = curr_timestamp + poem_mill_time + POEM_RESULT_WAIT;
-            self.is_dirty = true;
-            log::info!("Player {} OPT Timeout, Auto Failed!", self.player_name);
+        if self.next_opt_index < MATCH_POEM_NUM as i32 {
+            if curr_timestamp > self.next_opt_timeout_timestamp {
+                self.opt_bitmap |= 1 << self.next_opt_index;
+                self.next_opt_index += 1;
+                self.next_opt_timeout_timestamp =
+                    curr_timestamp + poem_mill_time + POEM_RESULT_WAIT;
+                self.is_dirty = true;
+                log::info!("Player {} OPT Timeout, Auto Failed!", self.player_name);
+            }
         }
     }
 
@@ -380,7 +389,7 @@ impl MatchGameController {
 
         log::info!("Try Start a new Game!");
         let player_level = player1.player_level;
-        if let Some(poem_json_str) = self
+        if let Some(poem_data_vec) = self
             .poem_table
             .get_random_game_data(player_level, MATCH_POEM_NUM)
         {
@@ -402,7 +411,7 @@ impl MatchGameController {
                 player1_name: player1_name,
                 player2_id: player2_id,
                 player2_name: player2_name,
-                poem_data_str: poem_json_str,
+                poem_data: poem_data_vec,
             };
 
             // 创建消息同步 Signal
