@@ -49,7 +49,8 @@ impl Player {
                         log::error!("逻辑错误，剩余时间不在合理范围内, {} ", remaining_time);
                     } else {
                         let remaining_percent = remaining_time as f64 / poem_mill_time as f64;
-                        let got_score = (poem_score as f64 * remaining_percent) as u32;
+                        let half_score = poem_score / 2;
+                        let got_score = half_score + (half_score as f64 * remaining_percent) as u32;
                         self.game_score += got_score;
                     }
                 }
@@ -77,12 +78,14 @@ impl Player {
 
                     let remaining_percent =
                         robot.next_early_opt_time as f64 / poem_mill_time as f64;
-                    let got_score = (poem_score as f64 * remaining_percent) as u32;
+                    let half_score = poem_score / 2;
+                    let got_score = half_score + (half_score as f64 * remaining_percent) as u32;
                     self.game_score += got_score;
 
                     self.next_opt_index += 1;
-                    self.next_opt_timeout_timestamp =
-                        curr_timestamp + poem_mill_time + POEM_RESULT_WAIT;
+                    // 对于机器人来说，就不要下一首诗的等待时间了
+                    self.next_opt_timeout_timestamp = curr_timestamp + poem_mill_time;
+                    // + POEM_RESULT_WAIT;
                 }
             }
         }
@@ -205,13 +208,20 @@ impl Game {
 
         let (ea, eb, _) =
             petable.get_ea_eb(self.player1.player_elo_score, self.player2.player_elo_score);
-        let (player1_sa, player2_sa) = if self.player1.game_score > self.player1.game_score {
+        let (player1_sa, player2_sa) = if self.player1.game_score > self.player2.game_score {
             (1.0, 0.0)
         } else if self.player1.game_score < self.player2.game_score {
             (0.0, 1.0)
         } else {
             (0.5, 0.5)
         };
+        log::info!(
+            "ea = {}, eb = {}, player1_sa = {}, player2_sa = {}",
+            ea,
+            eb,
+            player1_sa,
+            player2_sa,
+        );
 
         let player1_new_elo_score: u32 =
             (self.player1.player_elo_score as f64 + 32.0 * (player1_sa - ea)) as u32;
