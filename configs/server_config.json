@@ -3,5 +3,7 @@
     "port": 3044,
     "poem_mill_time": 10000,
     "poem_score": 1000,
-    "match_data_key_name": "PoemStarsMatchKill"
+    "match_data_key_name": "PoemStarsMatchKill",
+    "game_num_key_name": "PoemStarsGameNum",
+    "clients_num_key_name": "PoemStarsClientsNum"
 }

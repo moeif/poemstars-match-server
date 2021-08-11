@@ -28,6 +28,8 @@ fn main() {
     let (handler, listener) = node::split();
     start_redis_handler(
         server_config.match_data_key_name.clone(),
+        server_config.game_num_key_name.clone(),
+        server_config.clients_num_key_name.clone(),
         rx_for_redis_handler,
     );
     start_server(
@@ -341,6 +343,8 @@ fn start_game_loop(
 // lang, player_id, player_level
 fn start_redis_handler(
     match_data_key_name: String,
+    game_num_key_name: String,
+    clients_num_key_name: String,
     rx: std::sync::mpsc::Receiver<common::RedisOpt>,
 ) {
     let client = redis::Client::open("redis://127.0.0.1:6379").unwrap();
@@ -369,10 +373,10 @@ fn start_redis_handler(
                         }
                     }
                     common::RedisOpt::GameStatus(game_count) => {
-                        if let Ok(()) = conn.set("PoemStarsGameNum", game_count) {}
+                        if let Ok(()) = conn.set(&game_num_key_name, game_count) {}
                     }
                     common::RedisOpt::ServerStatus(client_num) => {
-                        if let Ok(()) = conn.set("PoemStarsClientNum", client_num) {}
+                        if let Ok(()) = conn.set(&clients_num_key_name, client_num) {}
                     }
                 }
             }

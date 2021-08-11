@@ -9,6 +9,8 @@ pub struct ServerConfig {
     pub poem_mill_time: i64,
     pub poem_score: u32,
     pub match_data_key_name: String,
+    pub game_num_key_name: String,
+    pub clients_num_key_name: String,
 }
 
 impl ServerConfig {
