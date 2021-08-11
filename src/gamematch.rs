@@ -90,14 +90,16 @@ impl MatchController {
                             log::info!("MATCHED!, waited_time < 3500, group <= 2");
                             // 匹配成功
                             matched = true;
-                        } else if waited_time <= 4500 && group <= 3 {
+                        } else if waited_time <= 4000 && group <= 3 {
                             log::info!("MATCHED!, waited_time < 4500 group <= 3");
                             matched = true;
                         } else {
-                            if group <= 4 {
-                                log::info!("MATCHED! group <= 4");
+                            // if group <= 4 {
+                            if waited_time > 4000 {
+                                log::info!("MATCHED! no condition, just real player!");
                                 matched = true;
                             }
+                            // }
                         }
                     }
                 } else {
