@@ -42,6 +42,6 @@ impl RobotTable {
     pub fn back_id_name(&mut self, id: String, name: String) {
         let robot = RobotRecord { id, name };
 
-        self.robot_vec.push_back(robot);
+        self.robot_vec.push_front(robot);
     }
 }

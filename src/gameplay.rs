@@ -321,6 +321,14 @@ impl MatchGameController {
                 log::info!("Game {} is END!", game.id);
                 self.ended_game.push(game.id.clone());
 
+                if let Some(player1_robot) = &game.player1.robot {
+                    self.robot_ctrl.back_robot(player1_robot);
+                }
+
+                if let Some(player2_robot) = &game.player2.robot {
+                    self.robot_ctrl.back_robot(player2_robot);
+                }
+
                 if let Some(proto_json_str) = game.gc_end_game_to_json(&self.petable) {
                     log::info!("Sync GCEndGame {} END data -> Client!", game.id);
                     let signal = Signal::Sync(

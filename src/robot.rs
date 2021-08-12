@@ -87,7 +87,8 @@ impl RobotController {
         return robot;
     }
 
-    pub fn back_robot(&mut self, robot: Robot) {
-        self.robottable.back_id_name(robot.id, robot.name);
+    pub fn back_robot(&mut self, robot: &Robot) {
+        self.robottable
+            .back_id_name(robot.id.clone(), robot.name.clone());
     }
 }
