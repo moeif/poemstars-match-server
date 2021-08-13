@@ -20,7 +20,7 @@ impl Robot {
         // let four_of_time = max_time / 4;
         let mut rng = rand::thread_rng();
         // self.next_early_opt_time = rng.gen_range(1..half_time);
-        self.next_early_opt_time = rng.gen_range(3000..=7000);
+        self.next_early_opt_time = rng.gen_range(4000..8000);
         // log::error!("Net OptTIME: {}", self.next_early_opt_time);
     }
 
