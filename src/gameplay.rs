@@ -73,7 +73,6 @@ impl Player {
                     let opt_result = robot.get_opt_result();
                     self.opt_bitmap |= opt_result << self.next_opt_index;
                     self.is_dirty = true;
-                    robot.set_next_opt_wait_time(poem_mill_time);
                     log::info!("ROBOT {} auto OPT!", self.player_name);
 
                     let remaining_percent =
@@ -83,10 +82,20 @@ impl Player {
                     self.game_score += got_score;
 
                     self.next_opt_index += 1;
+                    robot.set_next_opt_wait_time(poem_mill_time);
                     // 对于机器人来说，就不要下一首诗的等待时间了
                     self.next_opt_timeout_timestamp = curr_timestamp + poem_mill_time;
                     // + POEM_RESULT_WAIT;
                 }
+                // else {
+                //     log::error!(
+                //         "Ready OPT: {} - {} - {} - {}",
+                //         curr_timestamp,
+                //         next_opt_time,
+                //         robot.next_early_opt_time,
+                //         next_opt_time - curr_timestamp
+                //     );
+                // }
             }
         }
     }

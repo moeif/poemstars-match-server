@@ -1,7 +1,7 @@
 use crate::robottable::RobotTable;
 use rand::Rng;
 
-const MIN_CORRECTION_PERCENT: f64 = 40.0;
+const MIN_CORRECTION_PERCENT: f64 = 30.0;
 const MAX_CORRECTION_PERCENT: f64 = 80.0;
 
 #[derive(Debug)]
@@ -16,9 +16,12 @@ pub struct Robot {
 
 impl Robot {
     pub fn set_next_opt_wait_time(&mut self, max_time: i64) {
-        let half_time = max_time / 2;
+        // let half_time = max_time / 2;
+        // let four_of_time = max_time / 4;
         let mut rng = rand::thread_rng();
-        self.next_early_opt_time = rng.gen_range(1..half_time);
+        // self.next_early_opt_time = rng.gen_range(1..half_time);
+        self.next_early_opt_time = rng.gen_range(3000..=7000);
+        // log::error!("Net OptTIME: {}", self.next_early_opt_time);
     }
 
     pub fn get_opt_result(&self) -> u32 {
