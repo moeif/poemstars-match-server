@@ -79,7 +79,11 @@ impl Player {
                         robot.next_early_opt_time as f64 / poem_mill_time as f64;
                     let half_score = poem_score / 2;
                     let got_score = half_score + (half_score as f64 * remaining_percent) as u32;
-                    self.game_score += got_score;
+                    if opt_result == 0 {
+                        // log::info!(">>>>>>>>>>>>>>> Robot Score: remainingPercent: {}, half_score: {}, got_score: {}",
+                        //         remaining_percent, half_score, got_score);
+                        self.game_score += got_score;
+                    }
 
                     self.next_opt_index += 1;
                     robot.set_next_opt_wait_time(poem_mill_time);
