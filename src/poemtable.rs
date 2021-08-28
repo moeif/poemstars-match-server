@@ -93,6 +93,7 @@ impl PoemTable {
         id_vec_map.insert(51, (500..=700).collect());
         id_vec_map.insert(61, (600..=800).collect());
         id_vec_map.insert(71, (300..=sum).collect());
+        id_vec_map.insert(0, (1..=sum).collect()); // if level is zero, random from all
 
         Self {
             level_map,
@@ -103,16 +104,17 @@ impl PoemTable {
 
     pub fn get_random_game_data(&mut self, level: u32, count: u32) -> Option<Vec<PoemLineRecord>> {
         //Option<String> {
-        let key = match level {
-            0..=10 => 1,
-            11..=20 => 11,
-            21..=30 => 21,
-            31..=40 => 31,
-            41..=50 => 41,
-            51..=60 => 51,
-            61..=70 => 61,
-            _ => 71,
-        };
+        // let key = match level {
+        //     0..=10 => 1,
+        //     11..=20 => 11,
+        //     21..=30 => 21,
+        //     31..=40 => 31,
+        //     41..=50 => 41,
+        //     51..=60 => 51,
+        //     61..=70 => 61,
+        //     _ => 71,
+        // };
+        let key = 0;
         let mut selected_poem_record: Vec<PoemLineRecord> = Vec::new();
         let mut rng = rand::thread_rng();
         if let Some(ref mut level_id_vec) = self.level_vec_map.get_mut(&key) {
